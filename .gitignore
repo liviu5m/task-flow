@@ -1,0 +1,24 @@
+# --- Java / Spring Boot ---
+**/target/
+**/.gradle/
+**/build/
+*.class
+*.log
+
+# --- Next.js / Node ---
+**/node_modules/
+**/out/
+**/.next/
+.pnp.*
+.npm
+
+# --- Environment & Secrets ---
+backend/.env
+frontend/.env
+*.env.local
+
+# --- IDE & System ---
+**/.idea/
+**/.vscode/
+**/.DS_Store
+Thumbs.db

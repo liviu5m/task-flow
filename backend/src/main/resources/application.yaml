@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: backend
+  datasource:
+    url: jdbc:postgresql://aws-1-eu-west-1.pooler.supabase.com:5432/postgres
+    username: postgres.igyrslrplsjsbtkmpwha
+    password: apointy5liviu
+  jpa:
+    properties:
+      hibernate:
+        default_schema: task-flow
