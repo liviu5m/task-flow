@@ -9,3 +9,5 @@ spring:
     properties:
       hibernate:
         default_schema: task-flow
+    hibernate:
+      ddl-auto: update
