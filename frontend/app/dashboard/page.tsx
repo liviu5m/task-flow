@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -51,14 +50,13 @@ export default function DashboardPage() {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isSubmitOpen, setIsSubmitOpen] = useState(false);
 
-  // Task Creation Form State
   const [formCategory, setFormCategory] = useState("Network & Integration");
   const [formHandler, setFormHandler] = useState("http.webhook.dispatch");
   const [formPriority, setFormPriority] = useState(3);
   const [formMaxRetries, setFormMaxRetries] = useState(3);
   const [formPayload, setFormPayload] = useState(
     '{\n  "url": "https://hooks.internal.acme.dev/payload"\n}',
-  );
+  )
 
   const handleCreateTask = (e: React.FormEvent) => {
     e.preventDefault();

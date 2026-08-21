@@ -1,22 +1,47 @@
-// app/login/page.tsx
 "use client";
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { authClient } from "@/lib/auth-client";
+import toast from "react-hot-toast";
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    router.push("/dashboard");
+    await authClient.signIn.email(
+      {
+        email,
+        password,
+      },
+      {
+        onSuccess: (data) => {
+          toast.success("Logged in successfully!");
+          router.push("/dashboard");
+        },
+        onError: (error) => {
+          toast.error(error.error.message);
+        },
+      },
+    );
   };
 
   const handleGoogleAuth = () => {
-    router.push("/dashboard");
+    authClient.signIn.social(
+      {
+        provider: "google",
+        callbackURL: "/dashboard",
+      },
+      {
+        onError: (ctx) => {
+          toast(ctx.error.message);
+        },
+      },
+    );
   };
 
   return (
@@ -110,7 +135,10 @@ export default function LoginPage() {
 
         <p className="text-center text-xs text-slate-400 mt-5">
           Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-emerald-400 hover:underline">
+          <Link
+            href="/auth/signup"
+            className="text-emerald-400 hover:underline"
+          >
             Sign up
           </Link>
         </p>

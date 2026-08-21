@@ -9,5 +9,15 @@ spring:
     properties:
       hibernate:
         default_schema: task-flow
+        format_sql: true
     hibernate:
       ddl-auto: update
+    show-sql: true
+logging:
+  level:
+    root: INFO
+    com.task_flow.backend: DEBUG
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.springframework.web: DEBUG
+    org.springframework.transaction: DEBUG

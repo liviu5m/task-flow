@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useMutation } from "@tanstack/react-query";
-import { signup } from "@/api/auth";
-import { AxiosError } from "axios";
+import { authClient } from "@/lib/auth-client";
+import toast from "react-hot-toast";
+import { useRouter } from "next/navigation";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -13,41 +12,43 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
 
-  const { mutate: signupFunc } = useMutation({
-    mutationKey: ["signup"],
-    mutationFn: () => signup(name, email, password, passwordConfirmation),
-    onSuccess: (data) => {
-      console.log(data);
-      router.push("/dashboard");
-    },
-    onError: (err: AxiosError) => {
-      console.log(err.response);
-      if (
-        err?.response?.data ==
-        "Account not verified, please verify your account"
-      ) {
-        // resend(data.email);
-      }
-      if (Array.isArray(err?.response?.data)) {
-        setErrorMessage(
-          err.response.data
-            .map((msg: string, i: number) => `<div key="${i}">${msg}</div>`)
-            .join(""),
-        );
-      } else setErrorMessage(err?.response?.data as string);
-    },
-  });
-
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMessage("");
-    signupFunc();
+    await authClient.signUp.email(
+      {
+        email,
+        password,
+        name,
+      },
+      {
+        onSuccess: (data) => {
+          toast.success(
+            "Account created! Please check your email to verify your account.",
+          );
+          router.push("/auth/login");
+          console.log(data);
+        },
+        onError: (error) => {
+          toast.error(error.error.message);
+          console.log(error);
+        },
+      },
+    );
   };
 
-  const handleGoogleAuth = () => {
-    router.push("/dashboard");
+  const handleGoogleAuth = async () => {
+    await authClient.signIn.social(
+      {
+        provider: "google",
+        callbackURL: "/dashboard",
+      },
+      {
+        onError: (ctx) => {
+          toast(ctx.error.message);
+        },
+      },
+    );
   };
 
   return (
@@ -71,34 +72,11 @@ export default function SignupPage() {
           Enter your details below to start queuing jobs.
         </p>
 
-        {errorMessage && (
-          <div className="mb-6 p-3 bg-red-950/50 border border-red-800/60 rounded-xl text-xs text-red-400 font-mono">
-            {errorMessage}
-          </div>
-        )}
-
         <button
           onClick={handleGoogleAuth}
-          className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-sm font-medium transition-colors mb-6 text-slate-200 shadow-sm"
+          className="w-full flex items-center justify-center gap-3 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 border border-slate-700 rounded-xl text-sm font-medium transition-colors mb-6 text-slate-200 shadow-sm cursor-pointer"
         >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path
-              fill="#EA4335"
-              d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.8 14.8 1 12 1 7.4 1 3.5 3.6 1.6 7.4l3.7 2.9C6.2 7.3 8.9 5 12 5z"
-            />
-            <path
-              fill="#4285F4"
-              d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.3 14.7c-.2-.8-.4-1.7-.4-2.7s.2-1.9.4-2.7L1.6 6.4C.6 8.4 0 10.6 0 13s.6 4.6 1.6 6.6l3.7-2.9z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3.1 0-5.8-2.3-6.7-5.3L1.6 15.9C3.5 19.7 7.4 23 12 23z"
-            />
-          </svg>
+          <img src={"/google.png"} className="w-4 h-4" alt="google" />
           Continue with Google
         </button>
 
@@ -176,7 +154,7 @@ export default function SignupPage() {
 
         <p className="text-center text-xs text-slate-400 mt-6">
           Already have an account?{" "}
-          <Link href="/login" className="text-emerald-400 hover:underline">
+          <Link href="/auth/login" className="text-emerald-400 hover:underline">
             Sign in
           </Link>
         </p>

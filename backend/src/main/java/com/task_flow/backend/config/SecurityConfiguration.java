@@ -29,8 +29,7 @@ public class SecurityConfiguration {
             .cors(Customizer.withDefaults()) // <-- This connects your CORS bean to Spring Security
             .csrf(csrf -> csrf.disable())    // Disable CSRF if you are using stateless JWT/APIs
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/auth/**").permitAll() // Allow public access to auth endpoints
-                .anyRequest().authenticated()
+                .anyRequest().permitAll()
             );
         
         return http.build();
