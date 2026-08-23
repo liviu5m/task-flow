@@ -5,5 +5,7 @@ public enum WorkflowEventType {
     STEP_STARTED,
     STEP_COMPLETED,
     STEP_FAILED,
+    INTENT_CREATED,
+    INTENT_COMPLETED,
     WORKFLOW_COMPLETED,
 }
