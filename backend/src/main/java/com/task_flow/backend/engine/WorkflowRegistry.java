@@ -4,8 +4,8 @@ import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.graph.DirectedAcyclicGraph;
 import org.springframework.stereotype.Component;
 
-import lombok.Data;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -38,12 +38,18 @@ class WorkflowStep {
     private final WorkflowLambda lambda;
     private final int maxAttempts;
     private final List<String> dependencies;
+    private final Duration delay;
+    private final String childWorkflowName;
+    private final java.util.function.Function<Map<String, Object>, Map<String, Object>> inputMapper;
     
     public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts) {
         this.name = name;
         this.lambda = lambda;
         this.maxAttempts = maxAttempts;
         this.dependencies = new ArrayList<>();
+        this.delay = null;
+        this.childWorkflowName = null;
+        this.inputMapper = null;
     }
 
     public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts, List<String> dependencies) {
@@ -51,12 +57,42 @@ class WorkflowStep {
         this.lambda = lambda;
         this.maxAttempts = maxAttempts;
         this.dependencies = dependencies;
+        this.delay = null;
+        this.childWorkflowName = null;
+        this.inputMapper = null;
+    }
+
+    public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts, List<String> dependencies, Duration delay) {
+        this.name = name;
+        this.lambda = lambda;
+        this.maxAttempts = maxAttempts;
+        this.dependencies = dependencies;
+        this.delay = delay;
+        this.childWorkflowName = null;
+        this.inputMapper = null;
+    }
+
+    public WorkflowStep(String name,String childWorkflowName, java.util.function.Function<Map<String, Object>, Map<String, Object>> inputMapper, List<String> dependencies) {
+        this.name = name;
+        this.lambda = null;
+        this.maxAttempts = 1;
+        this.dependencies = dependencies;
+        this.delay = null;
+        this.childWorkflowName = childWorkflowName;
+        this.inputMapper = inputMapper;
     }
 
     public String getName() { return name; }
     public WorkflowLambda getLambda() { return lambda; }
     public int getMaxAttempts() { return maxAttempts; }
-    public List<String> getDependencies() { return dependencies; }
+    public List<String> getDependencies() { return dependencies; } 
+    public boolean hasDelay() { return delay != null; }
+    public Duration getDelay() { return delay; }
+    public boolean hasChildWorkflow() { return childWorkflowName != null; }
+    public String getChildWorkflowName() { return childWorkflowName; }
+    public java.util.function.Function<Map<String, Object>, Map<String, Object>> getInputMapper() { 
+        return inputMapper; 
+    }
 }
 
 @FunctionalInterface
@@ -103,6 +139,21 @@ class WorkflowBuilder {
 
     public WorkflowBuilder step(String stepName, WorkflowLambda lambda) {
         steps.add(new WorkflowStep(stepName, lambda, 3));
+        return this;
+    }
+
+    public WorkflowBuilder stepWithDelay(String stepName, Duration delay, WorkflowLambda lambda, int maxAttempts, List<String> dependencies) {
+        steps.add(new WorkflowStep(stepName, lambda, maxAttempts, dependencies, delay));
+        return this;
+    }
+
+    public WorkflowBuilder stepWithDelay(String stepName, Duration delay, WorkflowLambda lambda, int maxAttempts) {
+        steps.add(new WorkflowStep(stepName, lambda, maxAttempts,new ArrayList<>(), delay));
+        return this;
+    }
+
+    public WorkflowBuilder childWorkflow(String stepName, String childWorkflowName, java.util.function.Function<Map<String, Object>, Map<String, Object>> inputMapper, List<String> dependencies) {
+        steps.add(new WorkflowStep(stepName, childWorkflowName, inputMapper, dependencies));
         return this;
     }
 

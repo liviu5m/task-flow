@@ -4,4 +4,5 @@ public enum WorkflowInstanceStatus {
     RUNNING,
     COMPLETED,
     FAILED,
+    PAUSED
 }
