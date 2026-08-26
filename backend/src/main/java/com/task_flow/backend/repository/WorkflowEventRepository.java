@@ -33,4 +33,5 @@ public interface WorkflowEventRepository extends JpaRepository<WorkflowEvent, Wo
         @Param("data") String data
     );
 
+    WorkflowEvent findTopByWorkflowIdOrderBySequenceIdDesc(UUID workflowId);
 }

@@ -1,6 +1,7 @@
 package com.task_flow.backend.engine;
 import com.task_flow.backend.enums.WorkflowEventType;
 import com.task_flow.backend.enums.WorkflowInstanceStatus;
+import com.task_flow.backend.exception.RetryableStepException;
 import com.task_flow.backend.model.WorkflowEvent;
 import com.task_flow.backend.model.WorkflowInstance;
 import com.task_flow.backend.model.WorkflowParentChild;
@@ -59,7 +60,7 @@ public class TaskFlowEngine {
     this.sequenceRepository = sequenceRepository;
   }
 
-  @Transactional(noRollbackFor = RuntimeException.class)
+  @Transactional(noRollbackFor = RetryableStepException.class)
   public UUID start(String workflowName, Map<String, Object> initialInput) {
     UUID workflowId = UUID.randomUUID();
 
@@ -123,7 +124,7 @@ public class TaskFlowEngine {
     }
   }
 
-  @Transactional(noRollbackFor = RuntimeException.class)
+  @Transactional(noRollbackFor = RetryableStepException.class)
   public void executeSingleStep(UUID workflowId, String workflowName, String stepName) {
     WorkflowDefinition definition = registry.get(workflowName);
     WorkflowStep step = definition.stepMap().get(stepName);
@@ -154,6 +155,9 @@ public class TaskFlowEngine {
           }
         }
       } catch (Exception e) {
+        if(e instanceof RetryableStepException) {
+          throw (RetryableStepException) e;
+        }
         throw new RuntimeException("Failed to read event data during executeSingleStep", e);
       }
     }
@@ -195,7 +199,6 @@ public class TaskFlowEngine {
     context.put("idempotencyKey", workflowId.toString() + "-" + stepName);
     context.put("intentCreatedButNotCompleted", intentCreated && !intentCompleted);
     context.put("engine", this);
-
     int currentAttempt = startedAttempts + 1;
     appendEventAtomic(workflowId, WorkflowEventType.STEP_STARTED, Map.of(
         "stepName", stepName,
@@ -358,7 +361,7 @@ public class TaskFlowEngine {
       System.out.println(">>> [ENGINE] Scheduled timer for workflow " + workflowId + " (Step: " + stepName + ") to fire at " + timer.getFiresAt());
   }
 
-  @Transactional(noRollbackFor = RuntimeException.class)
+  @Transactional(noRollbackFor = RetryableStepException.class)
   public void resumeFromTimer(UUID workflowId, String stepName) {
       appendEventAtomic(workflowId, WorkflowEventType.TIMER_FIRED, Map.of("stepName", stepName));
       updateInstanceStatus(workflowId, "RUNNING");
@@ -376,7 +379,7 @@ public class TaskFlowEngine {
   public void writeIntentDone(UUID workflowId, String stepName, Object intent) {
       appendEventAtomic(workflowId, WorkflowEventType.INTENT_COMPLETED, Map.of("stepName", stepName, "intent", intent));
   }
-  @Transactional(noRollbackFor = RuntimeException.class)
+  @Transactional(noRollbackFor = RetryableStepException.class)
   public void executeChildWorkflow(UUID workflowId, String stepName, WorkflowStep step) {
     List<WorkflowEvent> events = eventRepository.findByWorkflowIdOrderBySequenceIdAsc(workflowId);
 
@@ -405,5 +408,45 @@ public class TaskFlowEngine {
     "childWorkflowName", step.getChildWorkflowName()));
     updateInstanceStatus(workflowId, "PAUSED");
   }
-
+  private int countStartedAttempts(UUID workflowId, String stepName) {
+      int count = 0;
+      List<WorkflowEvent> events = eventRepository.findByWorkflowIdOrderBySequenceIdAsc(workflowId);
+      for (WorkflowEvent e : events) {
+          try {
+              Map<String, Object> data = objectMapper.readValue(e.getData(), Map.class);
+              if (stepName.equals(data.get("stepName")) 
+                  && e.getType() == WorkflowEventType.STEP_STARTED) {
+                  count++;
+              }
+          } catch (Exception ignored) {}
+      }
+      return count;
+  }
+  @Transactional
+  public void recoverStuckWorkflows() {
+    List<WorkflowInstance> running = instanceRepository.findByStatus(WorkflowInstanceStatus.RUNNING);
+    for (WorkflowInstance instance : running) {
+        WorkflowEvent last = eventRepository.findTopByWorkflowIdOrderBySequenceIdDesc(instance.getId());
+        if (last == null || last.getType() != WorkflowEventType.STEP_FAILED) continue;
+        
+        try {
+            Map<String, Object> data = objectMapper.readValue(last.getData(), Map.class);
+            String stepName = (String) data.get("stepName");
+            WorkflowDefinition def = registry.get(instance.getName());
+            WorkflowStep step = def.stepMap().get(stepName);
+            if (step == null) continue;
+            
+            int startedAttempts = countStartedAttempts(instance.getId(), stepName);
+            int currentAttempt = startedAttempts + 1;
+            
+            if (currentAttempt < step.getMaxAttempts()) {
+                System.out.println(">>> [RECOVERY] Re-enqueueing stuck step " + stepName 
+                    + " for workflow " + instance.getId());
+                redisTaskProducer.enqueueTask(instance.getId(), instance.getName(), stepName, currentAttempt);
+            }
+        } catch (Exception e) {
+            System.err.println(">>> [RECOVERY] Failed to recover workflow " + instance.getId() + ": " + e.getMessage());
+        }
+    }
+}
 }
