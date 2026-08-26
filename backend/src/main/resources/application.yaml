@@ -10,6 +10,7 @@ spring:
       hibernate:
         default_schema: task-flow
         format_sql: true
+        show_sql: false
     hibernate:
       ddl-auto: update
   data:

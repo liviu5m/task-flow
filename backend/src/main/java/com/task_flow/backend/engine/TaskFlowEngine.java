@@ -4,10 +4,12 @@ import com.task_flow.backend.enums.WorkflowInstanceStatus;
 import com.task_flow.backend.model.WorkflowEvent;
 import com.task_flow.backend.model.WorkflowInstance;
 import com.task_flow.backend.model.WorkflowParentChild;
+import com.task_flow.backend.model.WorkflowSequence;
 import com.task_flow.backend.model.WorkflowTimer;
 import com.task_flow.backend.repository.WorkflowEventRepository;
 import com.task_flow.backend.repository.WorkflowInstanceRepository;
 import com.task_flow.backend.repository.WorkflowParentChildRepository;
+import com.task_flow.backend.repository.WorkflowSequenceRepository;
 import com.task_flow.backend.repository.WorkflowTimerRepository;
 import com.task_flow.backend.service.RedisTaskProducer;
 
@@ -36,6 +38,7 @@ public class TaskFlowEngine {
   private final RedisTaskProducer redisTaskProducer;
   private final WorkflowTimerRepository workflowTimerRepository;
   private final WorkflowParentChildRepository parentChildRepository;
+  private final WorkflowSequenceRepository sequenceRepository;
 
   public TaskFlowEngine(WorkflowRegistry registry,
     WorkflowInstanceRepository instanceRepository,
@@ -43,7 +46,8 @@ public class TaskFlowEngine {
     ObjectMapper objectMapper,
     RedisTaskProducer redisTaskProducer,
     WorkflowTimerRepository timerRepository,
-    WorkflowParentChildRepository parentChildRepository
+    WorkflowParentChildRepository parentChildRepository,
+    WorkflowSequenceRepository sequenceRepository
     ) {  
     this.registry = registry; 
     this.instanceRepository = instanceRepository; 
@@ -52,6 +56,7 @@ public class TaskFlowEngine {
     this.redisTaskProducer = redisTaskProducer;
     this.workflowTimerRepository = timerRepository;
     this.parentChildRepository = parentChildRepository;
+    this.sequenceRepository = sequenceRepository;
   }
 
   @Transactional(noRollbackFor = RuntimeException.class)
@@ -63,8 +68,8 @@ public class TaskFlowEngine {
     instance.setName(workflowName);
     instance.setStatus(WorkflowInstanceStatus.valueOf("RUNNING"));
     instanceRepository.save(instance);
-
-    appendEvent(workflowId, 1L, WorkflowEventType.WORKFLOW_STARTED, initialInput);
+  
+    appendEventAtomic(workflowId, WorkflowEventType.WORKFLOW_STARTED, initialInput);
 
     executeWorkflow(workflowId, workflowName);
 
@@ -112,10 +117,7 @@ public class TaskFlowEngine {
     if (allStepsCompleted) {
         WorkflowInstance instance = instanceRepository.findById(workflowId).orElse(null);
         if (instance != null && instance.getStatus() == WorkflowInstanceStatus.RUNNING) {
-
-            Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-            long finalSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-            appendEvent(workflowId, finalSeq, WorkflowEventType.WORKFLOW_COMPLETED, Map.of());
+            appendEventAtomic(workflowId, WorkflowEventType.WORKFLOW_COMPLETED, Map.of());
             updateInstanceStatus(workflowId, "COMPLETED");
         }
     }
@@ -195,9 +197,7 @@ public class TaskFlowEngine {
     context.put("engine", this);
 
     int currentAttempt = startedAttempts + 1;
-    Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-    long startSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-    appendEvent(workflowId, startSeq, WorkflowEventType.STEP_STARTED, Map.of(
+    appendEventAtomic(workflowId, WorkflowEventType.STEP_STARTED, Map.of(
         "stepName", stepName,
         "attempt", currentAttempt
     ));
@@ -206,9 +206,7 @@ public class TaskFlowEngine {
     try {
       Object output = step.getLambda().execute(context);
       
-      maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-      long completeSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-      appendEvent(workflowId, completeSeq, WorkflowEventType.STEP_COMPLETED, Map.of(
+      appendEventAtomic(workflowId, WorkflowEventType.STEP_COMPLETED, Map.of(
           "stepName", stepName,
           "output", output == null ? "" : output
       ));
@@ -217,13 +215,10 @@ public class TaskFlowEngine {
 
     } catch (Exception e) {
 
-      maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-      long failSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
       Map<String, Object> errorData = new HashMap<>();
       errorData.put("stepName", stepName);
       errorData.put("error", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-      appendEvent(workflowId, failSeq, WorkflowEventType.STEP_FAILED, errorData);
-
+      appendEventAtomic(workflowId, WorkflowEventType.STEP_FAILED, errorData);
       if (currentAttempt < step.getMaxAttempts()) {
         System.out.println(">>> [WORKER] Step " + stepName + " failed. Attempt " + currentAttempt + "/" + step.getMaxAttempts() + ". Re-enqueueing for retry.");
         redisTaskProducer.enqueueTask(workflowId, workflowName, stepName, currentAttempt);
@@ -264,19 +259,22 @@ public class TaskFlowEngine {
     return context;
   }
 
-  private void appendEvent(UUID workflowId, long sequenceId, WorkflowEventType eventType, Object dataPayload) {
+  @Transactional
+  public void appendEventAtomic(UUID workflowId, WorkflowEventType eventType, Object dataPayload) {
     try {
       String jsonPayload = objectMapper.writeValueAsString(dataPayload);
-
-      WorkflowEvent event = new WorkflowEvent();
-      event.setWorkflowId(workflowId);
-      event.setSequenceId(sequenceId);
-      event.setType(eventType);
-      event.setData(jsonPayload);
-
-      eventRepository.save(event);
+      sequenceRepository.insertIfAbsent(workflowId);
+      WorkflowSequence seq = sequenceRepository.findByWorkflowIdForUpdate(workflowId);
+      if(seq == null) {
+        throw new IllegalStateException("Workflow sequence not found for workflow " + workflowId);
+      }
+      seq.setCurrentSeq(seq.getCurrentSeq() + 1);
+      sequenceRepository.save(seq);
+      Long seqId = seq.getCurrentSeq();
+      
+      eventRepository.insertAtomicEvent(workflowId,seqId, eventType.name(), jsonPayload);
     } catch (Exception e) {
-      throw new RuntimeException("Failed to serialize event payload to JSON", e);
+      throw new RuntimeException("Failed to atomically append the event", e);
     }
   }
 
@@ -300,9 +298,7 @@ public class TaskFlowEngine {
     String parentStepName = relationship.getParentStepName();
     Object childResult = getWorkflowFinalResult(childWorkflowId);
 
-    Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(parentWorkflowId);
-    long nextSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-    appendEvent(parentWorkflowId, nextSeq, WorkflowEventType.CHILD_WORKFLOW_COMPLETED, Map.of("stepName", parentStepName, "childWorkflowId", childWorkflowId,
+    appendEventAtomic(parentWorkflowId, WorkflowEventType.CHILD_WORKFLOW_COMPLETED, Map.of("stepName", parentStepName, "childWorkflowId", childWorkflowId,
     "status", status, "result", childResult));
 
     WorkflowInstance instance = instanceRepository.findById(parentWorkflowId).orElseThrow();
@@ -353,9 +349,7 @@ public class TaskFlowEngine {
       workflowTimerRepository.save(timer);
       System.out.println(">>> [ENGINE] Timer saved to DB with ID: " + timer.getId() + ", fires_at: " + timer.getFiresAt());
 
-      Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-      long nextSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-      appendEvent(workflowId, nextSeq, WorkflowEventType.TIMER_SCHEDULED, Map.of(
+      appendEventAtomic(workflowId, WorkflowEventType.TIMER_SCHEDULED, Map.of(
           "stepName", stepName,
           "firesAt", timer.getFiresAt().toString()
       ));
@@ -366,10 +360,7 @@ public class TaskFlowEngine {
 
   @Transactional(noRollbackFor = RuntimeException.class)
   public void resumeFromTimer(UUID workflowId, String stepName) {
-      Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-      long nextSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-      appendEvent(workflowId, nextSeq, WorkflowEventType.TIMER_FIRED, Map.of("stepName", stepName));
-
+      appendEventAtomic(workflowId, WorkflowEventType.TIMER_FIRED, Map.of("stepName", stepName));
       updateInstanceStatus(workflowId, "RUNNING");
       System.out.println(">>> [ENGINE] Timer fired! Resuming workflow " + workflowId + " at step: " + stepName);
 
@@ -379,15 +370,11 @@ public class TaskFlowEngine {
   }
 
   public void writeIntent(UUID workflowId, String stepName, Object intent) {
-      Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-      long nextSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-      appendEvent(workflowId, nextSeq, WorkflowEventType.INTENT_CREATED, Map.of("stepName", stepName, "intent", intent));
+      appendEventAtomic(workflowId, WorkflowEventType.INTENT_CREATED, Map.of("stepName", stepName, "intent", intent));
   }
 
   public void writeIntentDone(UUID workflowId, String stepName, Object intent) {
-      Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-      long nextSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-      appendEvent(workflowId, nextSeq, WorkflowEventType.INTENT_COMPLETED, Map.of("stepName", stepName, "intent", intent));
+      appendEventAtomic(workflowId, WorkflowEventType.INTENT_COMPLETED, Map.of("stepName", stepName, "intent", intent));
   }
   @Transactional(noRollbackFor = RuntimeException.class)
   public void executeChildWorkflow(UUID workflowId, String stepName, WorkflowStep step) {
@@ -414,10 +401,9 @@ public class TaskFlowEngine {
     relation.setParentStepName(stepName);
     parentChildRepository.save(relation);
 
-    Long maxSeq = eventRepository.findMaxSequenceIdByWorkflowId(workflowId);
-    long nextSeq = (maxSeq == null ? 0L : maxSeq) + 1L;
-    appendEvent(workflowId, nextSeq, WorkflowEventType.CHILD_WORKFLOW_STARTED, Map.of("stepName", stepName, "childWorkflowId", childworkflowId,
+    appendEventAtomic(workflowId, WorkflowEventType.CHILD_WORKFLOW_STARTED, Map.of("stepName", stepName, "childWorkflowId", childworkflowId,
     "childWorkflowName", step.getChildWorkflowName()));
     updateInstanceStatus(workflowId, "PAUSED");
   }
+
 }
