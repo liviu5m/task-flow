@@ -34,4 +34,5 @@ public interface WorkflowEventRepository extends JpaRepository<WorkflowEvent, Wo
     );
 
     WorkflowEvent findTopByWorkflowIdOrderBySequenceIdDesc(UUID workflowId);
+    void deleteAllByWorkflowId(UUID workflowId);
 }

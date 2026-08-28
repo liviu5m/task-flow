@@ -1,5 +1,6 @@
 package com.task_flow.backend.engine;
 import com.task_flow.backend.engine.TaskFlowEngine;
+import com.task_flow.backend.enums.WorkflowInstanceStatus;
 import com.task_flow.backend.model.WorkflowEvent;
 import com.task_flow.backend.model.WorkflowInstance;
 import com.task_flow.backend.repository.WorkflowEventRepository;
@@ -22,12 +23,12 @@ public class WorkflowRecoveryScheduler {
     @Scheduled(fixedDelay = 30000)
     @Transactional
     public void recoverStuckWorkflows() {
-        List<WorkflowInstance> runningInstances = instanceRepository.findByStatus("RUNNING");
+        List<WorkflowInstance> runningInstances = instanceRepository.findByStatus(WorkflowInstanceStatus.RUNNING);
         
         for (WorkflowInstance instance : runningInstances) {
             WorkflowEvent lastEvent = eventRepository.findTopByWorkflowIdOrderBySequenceIdDesc(instance.getId());
-            if (lastEvent != null && "STEP_FAILED".equals(lastEvent.getEventType())) {
-                taskFlowEngine.executeWorkflow(instance.getId());
+            if (lastEvent != null && "STEP_FAILED".equals(lastEvent.getType())) {
+                taskFlowEngine.executeWorkflow(instance.getId(), instance.getName());
             }
         }
     }

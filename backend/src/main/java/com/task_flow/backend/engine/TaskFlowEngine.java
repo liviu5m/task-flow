@@ -1,4 +1,5 @@
 package com.task_flow.backend.engine;
+import com.task_flow.backend.dto.StepContext;
 import com.task_flow.backend.enums.WorkflowEventType;
 import com.task_flow.backend.enums.WorkflowInstanceStatus;
 import com.task_flow.backend.exception.RetryableStepException;
@@ -14,19 +15,28 @@ import com.task_flow.backend.repository.WorkflowSequenceRepository;
 import com.task_flow.backend.repository.WorkflowTimerRepository;
 import com.task_flow.backend.service.RedisTaskProducer;
 
+import ch.qos.logback.core.joran.sanity.Pair;
 import tools.jackson.databind.ObjectMapper;
 
+import org.jgrapht.Graphs;
+import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.traverse.TopologicalOrderIterator;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -79,22 +89,26 @@ public class TaskFlowEngine {
 
   public void executeWorkflow(UUID workflowId, String workflowName) {
     WorkflowDefinition definition = registry.get(workflowName);
-    Map<String, Object> context = loadExistingStateAndReplay(workflowId);
-    TopologicalOrderIterator<String, org.jgrapht.graph.DefaultEdge> iterator = 
+    Map.Entry<Map<String, Object>, Set<String>> result = loadExistingStateAndReplay(workflowId);
+
+    Map<String, Object> context = result.getKey();
+    Set<String> startedSteps = result.getValue();
+    TopologicalOrderIterator<String, DefaultEdge> iterator =
         new TopologicalOrderIterator<>(definition.dag());
-    
-    boolean allStepsCompleted = true;
+
+    List<String> orderedSteps = new ArrayList<>();
     while (iterator.hasNext()) {
-        String stepName = iterator.next();
+        orderedSteps.add(iterator.next());
+    }
+    orderedSteps.sort(Comparator.naturalOrder());
+    boolean allStepsCompleted = true;
+    for(String stepName : orderedSteps) {
         WorkflowStep step = definition.stepMap().get(stepName);
 
-        
-
-        if (context.containsKey(stepName)) {
-          continue;
-        }else {
-          allStepsCompleted = false;
+        if (context.containsKey(stepName) || startedSteps.contains(stepName)) {
+            continue;
         }
+        allStepsCompleted = false;
 
         if (step == null) {
             throw new IllegalStateException("Step definition missing for: " + stepName);
@@ -112,7 +126,7 @@ public class TaskFlowEngine {
           continue;
         }
 
-        redisTaskProducer.enqueueTask(workflowId, workflowName, stepName);
+        redisTaskProducer.enqueueTask(workflowId, workflowName, stepName, 1);
     }
 
     if (allStepsCompleted) {
@@ -172,7 +186,7 @@ public class TaskFlowEngine {
       return;
     }
 
-    Map<String, Object> context = loadExistingStateAndReplay(workflowId);
+    Map<String, Object> context = loadExistingStateAndReplay(workflowId).getKey();
     if (step.hasDelay() && !context.containsKey("timerFired-" + stepName)) {
       boolean alreadyScheduled = false;
       for (WorkflowEvent event : events) {
@@ -198,16 +212,15 @@ public class TaskFlowEngine {
     context.put("stepName", stepName);
     context.put("idempotencyKey", workflowId.toString() + "-" + stepName);
     context.put("intentCreatedButNotCompleted", intentCreated && !intentCompleted);
-    context.put("engine", this);
+    StepContext stepContext = new StepContext(stepName, workflowId.toString() + "-" + stepName, intentCreated && !intentCompleted);
     int currentAttempt = startedAttempts + 1;
     appendEventAtomic(workflowId, WorkflowEventType.STEP_STARTED, Map.of(
         "stepName", stepName,
         "attempt", currentAttempt
     ));
 
-
     try {
-      Object output = step.getLambda().execute(context);
+      Object output = step.getLambda().execute(stepContext, context);
       
       appendEventAtomic(workflowId, WorkflowEventType.STEP_COMPLETED, Map.of(
           "stepName", stepName,
@@ -233,10 +246,12 @@ public class TaskFlowEngine {
   }
 
 
-  private Map<String, Object> loadExistingStateAndReplay(UUID workflowId) {
+  private Map.Entry<Map<String, Object>, Set<String>> loadExistingStateAndReplay(UUID workflowId) {
     Map<String, Object> context = new HashMap<>();
     List<WorkflowEvent> events = eventRepository.findByWorkflowIdOrderBySequenceIdAsc(workflowId);
-
+    Set<String> startedSteps = new HashSet<>();
+    Set<String> failedSteps = new HashSet<>();
+    Set<String> completedSteps = new HashSet<>();
     for (WorkflowEvent event : events) {
       try {
         Map<String, Object> data = objectMapper.readValue(event.getData(), Map.class);
@@ -247,6 +262,13 @@ public class TaskFlowEngine {
           String stepName = (String) data.get("stepName");
           Object output = data.get("output");
           context.put(stepName, output);
+          completedSteps.add(stepName);
+        } else if(event.getType() == WorkflowEventType.STEP_FAILED) {
+          String stepName = (String) data.get("stepName");
+          failedSteps.add(stepName);
+        }else if(event.getType() == WorkflowEventType.STEP_STARTED) {
+          String stepName = (String) data.get("stepName");
+          startedSteps.add(stepName);
         } else if (event.getType() == WorkflowEventType.TIMER_FIRED) {
           String stepName = (String) data.get("stepName");
           context.put("timerFired-" + stepName, true);
@@ -258,8 +280,7 @@ public class TaskFlowEngine {
         throw new RuntimeException("Failed to parse event data for crash recovery", e);
       }
     }
-
-    return context;
+    return new AbstractMap.SimpleEntry<>(context, startedSteps);
   }
 
   @Transactional
@@ -281,7 +302,7 @@ public class TaskFlowEngine {
     }
   }
 
-  private void updateInstanceStatus(UUID workflowId, String status) {
+  public void updateInstanceStatus(UUID workflowId, String status) {
     WorkflowInstance instance = instanceRepository.findById(workflowId)
     .orElseThrow(() -> new IllegalArgumentException("Workflow instance not found: " + workflowId));
     instance.setStatus(WorkflowInstanceStatus.valueOf(status));
@@ -291,9 +312,9 @@ public class TaskFlowEngine {
       notifyParentIfExists(workflowId, status);
     }
   }
-  
-  private void notifyParentIfExists(UUID childWorkflowId, String status) {
-    Optional<WorkflowParentChild> relation = parentChildRepository.findByChildWorkflowId(childWorkflowId);
+  @Transactional(isolation = Isolation.SERIALIZABLE) 
+  public void notifyParentIfExists(UUID childWorkflowId, String status) {
+    Optional<WorkflowParentChild> relation = parentChildRepository.findByChildWorkflowIdForUpdate(childWorkflowId);
     if(relation.isEmpty()) return;
     
     WorkflowParentChild relationship = relation.get();
@@ -305,8 +326,10 @@ public class TaskFlowEngine {
     "status", status, "result", childResult));
 
     WorkflowInstance instance = instanceRepository.findById(parentWorkflowId).orElseThrow();
-    updateInstanceStatus(parentWorkflowId, "RUNNING");
-    executeWorkflow(parentWorkflowId, instance.getName());
+    if(instance.getStatus() == WorkflowInstanceStatus.PAUSED) {
+      updateInstanceStatus(parentWorkflowId, "RUNNING");
+      executeWorkflow(parentWorkflowId, instance.getName());
+    }
   }
 
   public Object getWorkflowFinalResult(UUID workflowId) {
@@ -393,7 +416,7 @@ public class TaskFlowEngine {
       }
     }
 
-    Map<String, Object> parentContext = loadExistingStateAndReplay(workflowId);
+    Map<String, Object> parentContext = loadExistingStateAndReplay(workflowId).getKey();
     Map<String, Object> childInput = step.getInputMapper().apply(parentContext);
     
     UUID childworkflowId = start(step.getChildWorkflowName(), childInput);

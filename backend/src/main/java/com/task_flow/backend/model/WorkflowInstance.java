@@ -33,7 +33,6 @@ public class WorkflowInstance extends BaseEntity {
     @Column(nullable = false, length = 100)
     private WorkflowInstanceStatus status;
     
-    @PrePersist
     public void prePersist() {
         if (this.id == null) {
             this.id = UUID.randomUUID();

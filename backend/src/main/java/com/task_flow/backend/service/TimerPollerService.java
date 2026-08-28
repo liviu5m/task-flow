@@ -24,11 +24,11 @@ public class TimerPollerService {
     public void pollTimers() {
         List<WorkflowTimer> dueTimers = timerRepository.findDueTimersForUpdate();
         for (WorkflowTimer timer : dueTimers) {
-            timer.setFired(true);
-            timerRepository.save(timer);
 
             try {
                 taskFlowEngine.resumeFromTimer(timer.getWorkflowId(), timer.getStepName());
+                timer.setFired(true);
+                timerRepository.save(timer);
             } catch (Exception e) {
                 System.err.println(">>> [POLLER] Failed to resume workflow from timer: " + e.getMessage());
                 e.printStackTrace();

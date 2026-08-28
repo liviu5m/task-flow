@@ -11,7 +11,7 @@ public class TaskMessage {
     private UUID workflowId;
     private String workflowName;
     private String stepName;
-    private int attempt;
+    private int attempt = 1;
     
     public TaskMessage(UUID workflowId, String workflowName, String stepName, int attempt) {
         this.workflowId = workflowId;

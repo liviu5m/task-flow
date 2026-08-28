@@ -4,6 +4,9 @@ import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.graph.DirectedAcyclicGraph;
 import org.springframework.stereotype.Component;
 
+import com.task_flow.backend.dto.StepContext;
+
+import lombok.Data;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -97,7 +100,7 @@ class WorkflowStep {
 
 @FunctionalInterface
 interface WorkflowLambda {
-    Object execute(Map<String, Object> context) throws Exception;
+    Object execute(StepContext stepContext, Map<String, Object> context) throws Exception;
 }
 
 class WorkflowDefinition {
@@ -174,3 +177,4 @@ class WorkflowBuilder {
         return new WorkflowDefinition(name, steps, g, stepMap);
     }
 }
+
