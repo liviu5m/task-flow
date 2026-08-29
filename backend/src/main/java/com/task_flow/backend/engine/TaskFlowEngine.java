@@ -50,6 +50,7 @@ public class TaskFlowEngine {
   private final WorkflowTimerRepository workflowTimerRepository;
   private final WorkflowParentChildRepository parentChildRepository;
   private final WorkflowSequenceRepository sequenceRepository;
+  private final LeaderElector leaderElector;
 
   public TaskFlowEngine(WorkflowRegistry registry,
     WorkflowInstanceRepository instanceRepository,
@@ -58,7 +59,8 @@ public class TaskFlowEngine {
     RedisTaskProducer redisTaskProducer,
     WorkflowTimerRepository timerRepository,
     WorkflowParentChildRepository parentChildRepository,
-    WorkflowSequenceRepository sequenceRepository
+    WorkflowSequenceRepository sequenceRepository,
+    LeaderElector leaderElector
     ) {  
     this.registry = registry; 
     this.instanceRepository = instanceRepository; 
@@ -68,6 +70,7 @@ public class TaskFlowEngine {
     this.workflowTimerRepository = timerRepository;
     this.parentChildRepository = parentChildRepository;
     this.sequenceRepository = sequenceRepository;
+    this.leaderElector = leaderElector;
   }
 
   @Transactional(noRollbackFor = RetryableStepException.class)
@@ -88,6 +91,10 @@ public class TaskFlowEngine {
   }
 
   public void executeWorkflow(UUID workflowId, String workflowName) {
+    if(!leaderElector.isLeader()) {
+      System.out.println(">>> [ENGINE] Not a leader. Skipping dispatch for workflow: " + workflowId);
+      return;
+    }
     WorkflowDefinition definition = registry.get(workflowName);
     Map.Entry<Map<String, Object>, Set<String>> result = loadExistingStateAndReplay(workflowId);
 

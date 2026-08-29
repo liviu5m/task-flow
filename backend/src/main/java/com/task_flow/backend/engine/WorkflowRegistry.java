@@ -21,6 +21,16 @@ public class WorkflowRegistry {
     
     private final Map<String, WorkflowDefinition> registry = new HashMap<>();
 
+    public WorkflowRegistry() {
+        // Register test-workflow for leader election testing
+        register("test-workflow", builder -> {
+            builder.step("step1", (context, input) -> {
+                System.out.println(">>> [STEP] Executing step1 for workflow: " + input.get("workflowId"));
+                return "step1-output";
+            }, 3);
+        });
+    }
+
     public void register(String name, Consumer<WorkflowBuilder> configurer) {
         WorkflowBuilder builder = new WorkflowBuilder(name);
         configurer.accept(builder);
