@@ -6,15 +6,14 @@ import org.springframework.stereotype.Component;
 
 import com.task_flow.backend.dto.StepContext;
 
-import lombok.Data;
-
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
 
 @Component
 public class WorkflowRegistry {
@@ -22,8 +21,7 @@ public class WorkflowRegistry {
     private final Map<String, WorkflowDefinition> registry = new HashMap<>();
 
     public WorkflowRegistry() {
-        // Register test-workflow for leader election testing
-        register("test-workflow", builder -> {
+      register("test-workflow", builder -> {
             builder.step("step1", (context, input) -> {
                 System.out.println(">>> [STEP] Executing step1 for workflow: " + input.get("workflowId"));
                 return "step1-output";
@@ -54,6 +52,8 @@ class WorkflowStep {
     private final Duration delay;
     private final String childWorkflowName;
     private final java.util.function.Function<Map<String, Object>, Map<String, Object>> inputMapper;
+    private final Predicate<Map<String, Object>> condition;
+
     
     public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts) {
         this.name = name;
@@ -63,6 +63,7 @@ class WorkflowStep {
         this.delay = null;
         this.childWorkflowName = null;
         this.inputMapper = null;
+        this.condition = null;
     }
 
     public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts, List<String> dependencies) {
@@ -73,6 +74,7 @@ class WorkflowStep {
         this.delay = null;
         this.childWorkflowName = null;
         this.inputMapper = null;
+        this.condition = null;
     }
 
     public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts, List<String> dependencies, Duration delay) {
@@ -83,6 +85,27 @@ class WorkflowStep {
         this.delay = delay;
         this.childWorkflowName = null;
         this.inputMapper = null;
+        this.condition = null;
+    }
+
+    public WorkflowStep(
+        String name,
+        WorkflowLambda lambda,
+        int maxAttempts,
+        List<String> dependencies,
+        Duration delay,
+        String childWorkflowName,
+        Function<Map<String, Object>, Map<String, Object>> inputMapper,
+        Predicate<Map<String, Object>> condition
+    ) {
+        this.name = name;
+        this.lambda = lambda;
+        this.maxAttempts = maxAttempts;
+        this.dependencies = dependencies;
+        this.delay = delay;
+        this.childWorkflowName = childWorkflowName;
+        this.inputMapper = inputMapper;
+        this.condition = condition;
     }
 
     public WorkflowStep(String name,String childWorkflowName, java.util.function.Function<Map<String, Object>, Map<String, Object>> inputMapper, List<String> dependencies) {
@@ -93,6 +116,18 @@ class WorkflowStep {
         this.delay = null;
         this.childWorkflowName = childWorkflowName;
         this.inputMapper = inputMapper;
+        this.condition = null;
+    }
+
+    public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts, List<String> dependencies, Predicate<Map<String, Object>> condition) {
+        this.name = name;
+        this.lambda = lambda;
+        this.maxAttempts = maxAttempts;
+        this.dependencies = dependencies;
+        this.delay = null;
+        this.childWorkflowName = null;
+        this.inputMapper = null;
+        this.condition = condition;
     }
 
     public String getName() { return name; }
@@ -106,6 +141,8 @@ class WorkflowStep {
     public java.util.function.Function<Map<String, Object>, Map<String, Object>> getInputMapper() { 
         return inputMapper; 
     }
+    public boolean hasCondition() { return condition != null; }
+    public Predicate<Map<String, Object>> getCondition() { return condition; }
 }
 
 @FunctionalInterface
@@ -134,7 +171,7 @@ class WorkflowDefinition {
 
 class WorkflowBuilder {
     private final String name;
-    private final List<WorkflowStep> steps = new ArrayList<>();
+    final List<WorkflowStep> steps = new ArrayList<>();
 
     public WorkflowBuilder(String name) {
         this.name = name;
@@ -170,6 +207,74 @@ class WorkflowBuilder {
         return this;
     }
 
+
+    public WorkflowBuilder step(String stepName, WorkflowLambda lambda, int maxAttempts, List<String> dependencies, Predicate<Map<String, Object>> condition) {
+        steps.add(new WorkflowStep(stepName, lambda, maxAttempts, dependencies, condition));
+        return this;
+    }
+
+    public BranchBuilder branch(String name, List<String> dependencies, int maxAttempts) {
+        return new BranchBuilder(name, this, dependencies, maxAttempts);
+    }
+
+    public BranchBuilder branch(String name, List<String> dependencies) {
+        return branch(name, dependencies, 3);
+    }
+
+    public BranchBuilder branch(String name) {
+        return branch(name, new ArrayList<>(), 3);
+    }
+
+    public WorkflowBuilder ifElse(
+        String baseName,
+        Predicate<Map<String, Object>> condition,
+        WorkflowLambda thenLambda,
+        WorkflowLambda elseLambda,
+        int maxAttempts,
+        List<String> dependencies
+    ) {
+      BranchBuilder branchBuilder = branch(baseName, dependencies, maxAttempts);
+      branchBuilder.if_("then", condition)
+          .then("step", thenLambda);
+      branchBuilder.else_()
+          .then("step", elseLambda);
+      branchBuilder.endBranch();
+      return this;
+    }
+
+    public WorkflowBuilder ifElse(
+        String baseName,
+        Predicate<Map<String, Object>> condition,
+        WorkflowLambda thenLambda,
+        WorkflowLambda elseLambda,
+        List<String> dependencies
+    ) {
+        return ifElse(baseName, condition, thenLambda, elseLambda, 3, dependencies);
+    }
+
+    public WorkflowBuilder switchCase(
+        String baseName,
+        Function<Map<String, Object>, Object> valueSelector,
+        Consumer<SwitchCaseBuilder> caseConfigurer,
+        int maxAttempts,
+        List<String> dependencies
+    ) {
+        SwitchCaseBuilder switchBuilder = new SwitchCaseBuilder(baseName, this, valueSelector, maxAttempts, dependencies);
+        caseConfigurer.accept(switchBuilder);
+        switchBuilder.endSwitchCase();
+        return this;
+    }
+
+    public WorkflowBuilder switchCase(
+        String baseName,
+        Function<Map<String, Object>, Object> valueSelector,
+        Consumer<SwitchCaseBuilder> caseConfigurer,
+        List<String> dependencies
+    ) {
+        return switchCase(baseName, valueSelector, caseConfigurer, 3, dependencies);
+    }
+
+
     public WorkflowDefinition build() {
         DirectedAcyclicGraph<String, DefaultEdge> g =
             new DirectedAcyclicGraph<>(DefaultEdge.class);
@@ -186,5 +291,6 @@ class WorkflowBuilder {
         }
         return new WorkflowDefinition(name, steps, g, stepMap);
     }
+
 }
 

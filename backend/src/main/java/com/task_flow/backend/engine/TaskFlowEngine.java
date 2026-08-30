@@ -15,10 +15,8 @@ import com.task_flow.backend.repository.WorkflowSequenceRepository;
 import com.task_flow.backend.repository.WorkflowTimerRepository;
 import com.task_flow.backend.service.RedisTaskProducer;
 
-import ch.qos.logback.core.joran.sanity.Pair;
 import tools.jackson.databind.ObjectMapper;
 
-import org.jgrapht.Graphs;
 import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.traverse.TopologicalOrderIterator;
 import org.springframework.stereotype.Service;
@@ -99,7 +97,7 @@ public class TaskFlowEngine {
     Map.Entry<Map<String, Object>, Set<String>> result = loadExistingStateAndReplay(workflowId);
 
     Map<String, Object> context = result.getKey();
-    Set<String> startedSteps = result.getValue();
+    Set<String> processedSteps = result.getValue();
     TopologicalOrderIterator<String, DefaultEdge> iterator =
         new TopologicalOrderIterator<>(definition.dag());
 
@@ -112,13 +110,27 @@ public class TaskFlowEngine {
     for(String stepName : orderedSteps) {
         WorkflowStep step = definition.stepMap().get(stepName);
 
-        if (context.containsKey(stepName) || startedSteps.contains(stepName)) {
+        if (processedSteps.contains(stepName)) {
             continue;
         }
         allStepsCompleted = false;
 
         if (step == null) {
             throw new IllegalStateException("Step definition missing for: " + stepName);
+        }
+        
+        
+        if (step.hasCondition()) {
+            try {
+                if (!step.getCondition().test(context)) {
+                    appendEventAtomic(workflowId, WorkflowEventType.STEP_SKIPPED,
+                        Map.of("stepName", stepName, "reason", "condition_not_met"));
+                    context.put(stepName, null);  
+                    continue;
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to evaluate condition for step: " + stepName, e);
+            }
         }
         
         boolean dependenciesMet = true;
@@ -158,6 +170,7 @@ public class TaskFlowEngine {
     boolean alreadyCompleted = false;
     boolean intentCreated = false;
     boolean intentCompleted = false;
+    boolean alreadySkipped = false;
     int startedAttempts = 0;
     
     for (WorkflowEvent event : events) {
@@ -173,6 +186,8 @@ public class TaskFlowEngine {
             intentCreated = true;
           } else if (event.getType() == WorkflowEventType.INTENT_COMPLETED) {
             intentCompleted = true;
+          } else if(event.getType() == WorkflowEventType.STEP_SKIPPED) {
+            alreadySkipped = true;
           }
         }
       } catch (Exception e) {
@@ -183,7 +198,7 @@ public class TaskFlowEngine {
       }
     }
 
-    if (alreadyCompleted) {
+    if (alreadyCompleted || alreadySkipped) {
       System.out.println(">>> [WORKER] Step " + stepName + " is already completed for " + workflowId + ". Skipping.");
       return;
     }
@@ -259,6 +274,8 @@ public class TaskFlowEngine {
     Set<String> startedSteps = new HashSet<>();
     Set<String> failedSteps = new HashSet<>();
     Set<String> completedSteps = new HashSet<>();
+    Set<String> skippedSteps = new HashSet<>();
+
     for (WorkflowEvent event : events) {
       try {
         Map<String, Object> data = objectMapper.readValue(event.getData(), Map.class);
@@ -282,12 +299,19 @@ public class TaskFlowEngine {
         } else if (event.getType() == WorkflowEventType.CHILD_WORKFLOW_COMPLETED) {
           String stepName = (String) data.get("stepName");
           context.put(stepName, data.get("result"));
+        } else if(event.getType() == WorkflowEventType.STEP_SKIPPED) {
+          String stepName = (String) data.get("stepName");
+          skippedSteps.add(stepName);
+          context.put(stepName, null);
         }
       } catch (Exception e) {
         throw new RuntimeException("Failed to parse event data for crash recovery", e);
       }
     }
-    return new AbstractMap.SimpleEntry<>(context, startedSteps);
+    Set<String> allProcessedSteps = new HashSet<>(startedSteps);
+    allProcessedSteps.addAll(completedSteps);
+    allProcessedSteps.addAll(skippedSteps);  
+    return new AbstractMap.SimpleEntry<>(context, allProcessedSteps);
   }
 
   @Transactional
