@@ -53,6 +53,7 @@ class WorkflowStep {
     private final String childWorkflowName;
     private final java.util.function.Function<Map<String, Object>, Map<String, Object>> inputMapper;
     private final Predicate<Map<String, Object>> condition;
+    private String awaitedSignalName;
 
     
     public WorkflowStep(String name, WorkflowLambda lambda, int maxAttempts) {
@@ -130,6 +131,18 @@ class WorkflowStep {
         this.condition = condition;
     }
 
+    public WorkflowStep(String name, String awaitedSignalName, List<String> dependencies) {
+        this.name = name;
+        this.lambda = null;  
+        this.maxAttempts = 1;  
+        this.delay = null;
+        this.childWorkflowName = null;
+        this.inputMapper = null;
+        this.dependencies = dependencies;
+        this.condition = null;
+        this.awaitedSignalName = awaitedSignalName;
+    }
+
     public String getName() { return name; }
     public WorkflowLambda getLambda() { return lambda; }
     public int getMaxAttempts() { return maxAttempts; }
@@ -143,6 +156,13 @@ class WorkflowStep {
     }
     public boolean hasCondition() { return condition != null; }
     public Predicate<Map<String, Object>> getCondition() { return condition; }
+
+    public boolean isAwaitingSignal() {
+            return awaitedSignalName != null;
+    }
+    public String getAwaitedSignalName() {
+        return awaitedSignalName;
+    }
 }
 
 @FunctionalInterface
@@ -272,6 +292,14 @@ class WorkflowBuilder {
         List<String> dependencies
     ) {
         return switchCase(baseName, valueSelector, caseConfigurer, 3, dependencies);
+    }
+    public WorkflowBuilder awaitSignal(String stepName, String signalName, List<String> dependencies) {
+        steps.add(new WorkflowStep(stepName, signalName, dependencies));
+        return this;
+    }
+
+    public WorkflowBuilder awaitSignal(String stepName, String signalName) {
+        return awaitSignal(stepName, signalName, new ArrayList<>());
     }
 
 

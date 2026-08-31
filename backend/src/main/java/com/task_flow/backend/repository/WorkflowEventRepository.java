@@ -1,9 +1,12 @@
 package com.task_flow.backend.repository;
 
+import com.task_flow.backend.enums.WorkflowEventType;
 import com.task_flow.backend.model.WorkflowEvent;
 import com.task_flow.backend.model.WorkflowEventId;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -35,4 +38,9 @@ public interface WorkflowEventRepository extends JpaRepository<WorkflowEvent, Wo
 
     WorkflowEvent findTopByWorkflowIdOrderBySequenceIdDesc(UUID workflowId);
     void deleteAllByWorkflowId(UUID workflowId);
+    boolean existsByWorkflowIdAndTypeAndData(UUID workflowId, String type, Map<String, Object> data);
+    List<WorkflowEvent> findByWorkflowIdAndTypeOrderBySequenceIdDesc(
+        UUID workflowId, WorkflowEventType type);
+
+    boolean existsByWorkflowIdAndType(UUID workflowId, WorkflowEventType type);
 }

@@ -3,11 +3,14 @@ import com.task_flow.backend.dto.StepContext;
 import com.task_flow.backend.enums.WorkflowEventType;
 import com.task_flow.backend.enums.WorkflowInstanceStatus;
 import com.task_flow.backend.exception.RetryableStepException;
+import com.task_flow.backend.model.PendingSignal;
+import com.task_flow.backend.model.PendingSignalId;
 import com.task_flow.backend.model.WorkflowEvent;
 import com.task_flow.backend.model.WorkflowInstance;
 import com.task_flow.backend.model.WorkflowParentChild;
 import com.task_flow.backend.model.WorkflowSequence;
 import com.task_flow.backend.model.WorkflowTimer;
+import com.task_flow.backend.repository.PendingSignalRepository;
 import com.task_flow.backend.repository.WorkflowEventRepository;
 import com.task_flow.backend.repository.WorkflowInstanceRepository;
 import com.task_flow.backend.repository.WorkflowParentChildRepository;
@@ -49,6 +52,7 @@ public class TaskFlowEngine {
   private final WorkflowParentChildRepository parentChildRepository;
   private final WorkflowSequenceRepository sequenceRepository;
   private final LeaderElector leaderElector;
+  private final PendingSignalRepository pendingSignalRepository;
 
   public TaskFlowEngine(WorkflowRegistry registry,
     WorkflowInstanceRepository instanceRepository,
@@ -58,7 +62,8 @@ public class TaskFlowEngine {
     WorkflowTimerRepository timerRepository,
     WorkflowParentChildRepository parentChildRepository,
     WorkflowSequenceRepository sequenceRepository,
-    LeaderElector leaderElector
+    LeaderElector leaderElector,
+    PendingSignalRepository pendingSignalRepository
     ) {  
     this.registry = registry; 
     this.instanceRepository = instanceRepository; 
@@ -69,6 +74,7 @@ public class TaskFlowEngine {
     this.parentChildRepository = parentChildRepository;
     this.sequenceRepository = sequenceRepository;
     this.leaderElector = leaderElector;
+    this.pendingSignalRepository = pendingSignalRepository;
   }
 
   @Transactional(noRollbackFor = RetryableStepException.class)
@@ -92,6 +98,11 @@ public class TaskFlowEngine {
     if(!leaderElector.isLeader()) {
       System.out.println(">>> [ENGINE] Not a leader. Skipping dispatch for workflow: " + workflowId);
       return;
+    }
+    WorkflowInstance instance = instanceRepository.findById(workflowId)
+        .orElseThrow(() -> new RuntimeException("Workflow not found"));
+    if (instance.getStatus() == WorkflowInstanceStatus.PAUSED) {
+        updateInstanceStatus(workflowId, WorkflowInstanceStatus.RUNNING.name());
     }
     WorkflowDefinition definition = registry.get(workflowName);
     Map.Entry<Map<String, Object>, Set<String>> result = loadExistingStateAndReplay(workflowId);
@@ -118,7 +129,33 @@ public class TaskFlowEngine {
         if (step == null) {
             throw new IllegalStateException("Step definition missing for: " + stepName);
         }
-        
+
+        if (step.isAwaitingSignal()) {
+            String signalName = step.getAwaitedSignalName();
+
+            boolean alreadyAwaiting = pendingSignalRepository
+                .existsById(new PendingSignalId(workflowId, signalName));
+
+            if (!alreadyAwaiting) {
+                Map<String, Object> signalPayload = getSignalPayloadFromEvents(workflowId, signalName);
+                context.put(step.getName(), signalPayload);
+                continue;
+            }
+
+            boolean awaitingRecorded = eventRepository
+                .existsByWorkflowIdAndType(workflowId, WorkflowEventType.AWAITING_SIGNAL);
+
+            if (!awaitingRecorded) {
+                appendEventAtomic(workflowId, WorkflowEventType.AWAITING_SIGNAL,
+                    objectMapper.writeValueAsString(Map.of(
+                        "stepName", step.getName(),
+                        "signalName", signalName
+                    )));
+            }
+
+            updateInstanceStatus(workflowId, WorkflowInstanceStatus.PAUSED.name());
+            return;
+        }
         
         if (step.hasCondition()) {
             try {
@@ -149,7 +186,7 @@ public class TaskFlowEngine {
     }
 
     if (allStepsCompleted) {
-        WorkflowInstance instance = instanceRepository.findById(workflowId).orElse(null);
+        instance = instanceRepository.findById(workflowId).orElse(null);
         if (instance != null && instance.getStatus() == WorkflowInstanceStatus.RUNNING) {
             appendEventAtomic(workflowId, WorkflowEventType.WORKFLOW_COMPLETED, Map.of());
             updateInstanceStatus(workflowId, "COMPLETED");
@@ -303,6 +340,9 @@ public class TaskFlowEngine {
           String stepName = (String) data.get("stepName");
           skippedSteps.add(stepName);
           context.put(stepName, null);
+        } else if(event.getType() == WorkflowEventType.AWAITING_SIGNAL) {
+          String stepName = (String) data.get("stepName");
+          context.put("awaitingStep-"+stepName, null);
         }
       } catch (Exception e) {
         throw new RuntimeException("Failed to parse event data for crash recovery", e);
@@ -502,5 +542,28 @@ public class TaskFlowEngine {
             System.err.println(">>> [RECOVERY] Failed to recover workflow " + instance.getId() + ": " + e.getMessage());
         }
     }
+  }
+  private Map<String, Object> getSignalPayloadFromEvents(UUID workflowId, String signalName) {
+    return eventRepository
+        .findByWorkflowIdAndTypeOrderBySequenceIdDesc(workflowId, WorkflowEventType.SIGNAL_RECEIVED)
+        .stream()
+        .filter(e -> {
+            try {
+                Map<String, Object> data = objectMapper.readValue(e.getData(), Map.class);
+                return signalName.equals(data.get("signalName"));
+            } catch (Exception ex) {
+                return false;
+            }
+        })
+        .findFirst()
+        .map(e -> {
+            try {
+                Map<String, Object> data = objectMapper.readValue(e.getData(), Map.class);
+                return (Map<String, Object>) data.getOrDefault("payload", Map.of());
+            } catch (Exception ex) {
+                throw new RuntimeException(ex);
+            }
+        })
+        .orElseThrow(() -> new RuntimeException("Signal payload not found"));
 }
 }
