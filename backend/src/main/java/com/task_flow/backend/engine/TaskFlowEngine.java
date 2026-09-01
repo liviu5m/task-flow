@@ -3,6 +3,7 @@ import com.task_flow.backend.dto.StepContext;
 import com.task_flow.backend.enums.WorkflowEventType;
 import com.task_flow.backend.enums.WorkflowInstanceStatus;
 import com.task_flow.backend.exception.RetryableStepException;
+import com.task_flow.backend.exception.StepExecutionFailedException;
 import com.task_flow.backend.model.PendingSignal;
 import com.task_flow.backend.model.PendingSignalId;
 import com.task_flow.backend.model.WorkflowEvent;
@@ -77,7 +78,7 @@ public class TaskFlowEngine {
     this.pendingSignalRepository = pendingSignalRepository;
   }
 
-  @Transactional(noRollbackFor = RetryableStepException.class)
+  @Transactional
   public UUID start(String workflowName, Map<String, Object> initialInput) {
     UUID workflowId = UUID.randomUUID();
 
@@ -194,7 +195,7 @@ public class TaskFlowEngine {
     }
   }
 
-  @Transactional(noRollbackFor = RetryableStepException.class)
+  @Transactional 
   public void executeSingleStep(UUID workflowId, String workflowName, String stepName) {
     WorkflowDefinition definition = registry.get(workflowName);
     WorkflowStep step = definition.stepMap().get(stepName);
@@ -294,6 +295,7 @@ public class TaskFlowEngine {
       errorData.put("stepName", stepName);
       errorData.put("error", e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
       appendEventAtomic(workflowId, WorkflowEventType.STEP_FAILED, errorData);
+
       if (currentAttempt < step.getMaxAttempts()) {
         System.out.println(">>> [WORKER] Step " + stepName + " failed. Attempt " + currentAttempt + "/" + step.getMaxAttempts() + ". Re-enqueueing for retry.");
         redisTaskProducer.enqueueTask(workflowId, workflowName, stepName, currentAttempt);
@@ -455,7 +457,7 @@ public class TaskFlowEngine {
       System.out.println(">>> [ENGINE] Scheduled timer for workflow " + workflowId + " (Step: " + stepName + ") to fire at " + timer.getFiresAt());
   }
 
-  @Transactional(noRollbackFor = RetryableStepException.class)
+  @Transactional
   public void resumeFromTimer(UUID workflowId, String stepName) {
       appendEventAtomic(workflowId, WorkflowEventType.TIMER_FIRED, Map.of("stepName", stepName));
       updateInstanceStatus(workflowId, "RUNNING");
@@ -473,7 +475,7 @@ public class TaskFlowEngine {
   public void writeIntentDone(UUID workflowId, String stepName, Object intent) {
       appendEventAtomic(workflowId, WorkflowEventType.INTENT_COMPLETED, Map.of("stepName", stepName, "intent", intent));
   }
-  @Transactional(noRollbackFor = RetryableStepException.class)
+  @Transactional
   public void executeChildWorkflow(UUID workflowId, String stepName, WorkflowStep step) {
     List<WorkflowEvent> events = eventRepository.findByWorkflowIdOrderBySequenceIdAsc(workflowId);
 
