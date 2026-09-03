@@ -94,12 +94,9 @@ public class TaskFlowEngine {
 
     return workflowId;
   }
-
+  
+  @Transactional
   public void executeWorkflow(UUID workflowId, String workflowName) {
-    if(!leaderElector.isLeader()) {
-      System.out.println(">>> [ENGINE] Not a leader. Skipping dispatch for workflow: " + workflowId);
-      return;
-    }
     WorkflowInstance instance = instanceRepository.findById(workflowId)
         .orElseThrow(() -> new RuntimeException("Workflow not found"));
     if (instance.getStatus() == WorkflowInstanceStatus.PAUSED) {
@@ -131,6 +128,17 @@ public class TaskFlowEngine {
             throw new IllegalStateException("Step definition missing for: " + stepName);
         }
 
+        boolean dependenciesMet = true;
+        for (String dependency : step.getDependencies()) {
+          if (!context.containsKey(dependency)) {
+            dependenciesMet = false;
+            break;
+          }
+        }
+
+        if (!dependenciesMet) {
+          continue;
+        }
         if (step.isAwaitingSignal()) {
             String signalName = step.getAwaitedSignalName();
 
@@ -171,17 +179,6 @@ public class TaskFlowEngine {
             }
         }
         
-        boolean dependenciesMet = true;
-        for (String dependency : step.getDependencies()) {
-          if (!context.containsKey(dependency)) {
-            dependenciesMet = false;
-            break;
-          }
-        }
-
-        if (!dependenciesMet) {
-          continue;
-        }
 
         redisTaskProducer.enqueueTask(workflowId, workflowName, stepName, 1);
     }
@@ -243,6 +240,10 @@ public class TaskFlowEngine {
 
     if(step.hasChildWorkflow()) {
       executeChildWorkflow(workflowId, stepName, step);
+      return;
+    }
+  if (step.isAwaitingSignal()) {
+      executeWorkflow(workflowId, workflowName);
       return;
     }
 
@@ -395,6 +396,19 @@ public class TaskFlowEngine {
     String parentStepName = relationship.getParentStepName();
     Object childResult = getWorkflowFinalResult(childWorkflowId);
 
+    boolean alreadyNotified = eventRepository.findByWorkflowIdAndTypeOrderBySequenceIdDesc(parentWorkflowId, WorkflowEventType.CHILD_WORKFLOW_COMPLETED)
+        .stream()
+        .anyMatch(e -> {
+            try {
+                return e.getData() != null && objectMapper.readTree(e.getData())
+                         .path("childWorkflowId").asText().equals(childWorkflowId.toString());
+            } catch (Exception ex) {
+                return false; 
+            }
+        });
+    if (alreadyNotified) {
+        return;
+    }
     appendEventAtomic(parentWorkflowId, WorkflowEventType.CHILD_WORKFLOW_COMPLETED, Map.of("stepName", parentStepName, "childWorkflowId", childWorkflowId,
     "status", status, "result", childResult));
 

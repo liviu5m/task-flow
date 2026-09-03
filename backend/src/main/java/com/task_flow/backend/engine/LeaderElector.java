@@ -4,11 +4,13 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import com.task_flow.backend.model.LeaderEpoch;
 import com.task_flow.backend.repository.LeaderEpochRepository;
 
 import jakarta.annotation.PostConstruct;
 
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -19,6 +21,7 @@ public class LeaderElector {
     private final LeaderEpochRepository leaderEpochRepository;
     private final AtomicBoolean isLeader = new AtomicBoolean(false);
     private final AtomicLong currentEpoch = new AtomicLong(0);
+    private Connection dedicatedConn;
 
     
     public LeaderElector(JdbcTemplate jdbcTemplate, LeaderEpochRepository leaderEpochRepository) {
@@ -34,10 +37,18 @@ public class LeaderElector {
 
     @Scheduled(fixedRate = 5000) 
     public void tryAcquireLeadership() {
-        Boolean acquired = jdbcTemplate.queryForObject(
-            "SELECT pg_try_advisory_lock(?);", Boolean.class, LOCK_ID
-        );
-        if (acquired != null && acquired) {
+      try {
+        if(dedicatedConn == null || dedicatedConn.isClosed()) {
+          dedicatedConn = jdbcTemplate.getDataSource().getConnection();
+        }
+        boolean acquired = false;
+        try (Statement stmt = dedicatedConn.createStatement()) {
+          ResultSet rs = stmt.executeQuery("SELECT pg_try_advisory_lock(" + LOCK_ID + ")");
+          if (rs.next()) {
+            acquired = rs.getBoolean(1);
+          }
+        }
+        if (acquired) {
             if (!isLeader.getAndSet(true)) {
                 leaderEpochRepository.incrementEpoch();
                 Long newEpoch = leaderEpochRepository.getCurrentEpoch();
@@ -51,6 +62,16 @@ public class LeaderElector {
             Long epoch = leaderEpochRepository.getCurrentEpoch();
             currentEpoch.set(epoch != null ? epoch : 0L);
         }
+      } catch (Exception e) {
+        System.err.println(">>> [LEADER] Failed to acquire leadership: " + e.getMessage());
+        isLeader.set(false);
+        try {
+          if (dedicatedConn != null) {
+            dedicatedConn.close();
+          }
+        } catch (Exception ignored) {}
+        dedicatedConn = null;
+      }
     }
 
     public boolean isLeader() {

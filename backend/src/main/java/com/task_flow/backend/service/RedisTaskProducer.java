@@ -39,8 +39,8 @@ public class RedisTaskProducer {
     public void enqueueTask(UUID workflowId, String workflowName, String stepName, int attempt) {
         try {
             TaskMessage task = new TaskMessage(workflowId, workflowName, stepName, attempt);
-            String jsonPayload = objectMapper.writeValueAsString(task);
             task.setLeaderEpoch(leaderElector.getCurrentEpoch());
+            String jsonPayload = objectMapper.writeValueAsString(task);
             redisTemplate.opsForStream().add(STREAM_KEY, Map.of("payload", jsonPayload));
         } catch (Exception e) {
             throw new RuntimeException("Failed to enqueue task to Redis", e);

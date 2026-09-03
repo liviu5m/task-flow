@@ -54,7 +54,6 @@ public class RedisWorkerConsumer implements InitializingBean {
             if (staleMessages != null && !staleMessages.isEmpty()) {
                 System.out.println(">>> [JANITOR] Found " + staleMessages.size() + " stale tasks. Reclaiming...");
                 for (MapRecord<String, Object, Object> message : staleMessages) {
-                    // Re-process the message (simulate XAUTOCLAIM by re-acknowledging)
                     redisTemplate.opsForStream().acknowledge(STREAM_KEY, GROUP_NAME, message.getId());
                     System.out.println(">>> [JANITOR] Reclaimed task ID: " + message.getId());
                 }
@@ -80,8 +79,13 @@ public class RedisWorkerConsumer implements InitializingBean {
                     }
                 }
             } catch (org.springframework.data.redis.RedisSystemException | org.springframework.data.redis.RedisConnectionFailureException e) {
-                System.err.println(">>> [WORKER] Redis connection lost or factory destroyed, stopping worker consumer loop.");
-                break;
+                System.err.println(">>> [WORKER] Redis connection lost. Retrying in 5s...");
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
