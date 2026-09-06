@@ -1,0 +1,240 @@
+# TaskFlow - Full Build Plan
+
+## What This Project Is
+
+Distributed workflow orchestration engine. Temporal clone.
+Event-sourced DAG executor with Redis workers, durable timers, signals,
+parent/child workflows, leader election.
+
+Not a todo app.
+
+Positioning: "Temporal-lite you can self-host on one JVM."
+
+Stack:
+- Backend: Java 21 / Spring Boot 4 / JPA / PostgreSQL / Redis
+- Frontend: Next.js / TypeScript / TanStack Query / React Flow
+- Infra: Docker Compose (Postgres + Redis + app), GitHub Actions CI
+
+---
+
+## 1. Pages (frontend)
+
+### Public
+| Page            | Path                       | Purpose                                            |
+|-----------------|----------------------------|----------------------------------------------------|
+| Landing         | `/`                        | Marketing, "What is TaskFlow", demo GIF, GH badge  |
+| Login           | `/auth/login`              | OAuth (already started)                            |
+| Register        | `/auth/register`           | OAuth signup                                       |
+
+### App (auth required)
+| Page                  | Path                                       | Purpose                                                                  |
+|-----------------------|--------------------------------------------|--------------------------------------------------------------------------|
+| Dashboard             | `/dashboard`                               | Workflow counts by status, recent runs, leader status                    |
+| Workflows list        | `/dashboard/workflows`                     | All workflow types + registered count                                    |
+| Workflow detail       | `/dashboard/workflows/[name]`              | Schema (DAG viz), input schema, recent instances                         |
+| Instance detail       | `/dashboard/instances/[id]`                | Crown jewel - full state, multi-tab view                                 |
+| New instance          | `/dashboard/instances/new/[name]`          | Dynamic form from input schema, submit                                   |
+| Signals               | `/dashboard/instances/[id]/signals`        | Send signal, see pending signals                                         |
+| Timers                | `/dashboard/instances/[id]/timers`         | Active timers + countdown                                                |
+| Logs                  | `/dashboard/instances/[id]/events`         | Append-only event stream                                                 |
+| Workers               | `/dashboard/workers`                       | Active Redis consumers, lag                                              |
+| Settings              | `/dashboard/settings`                      | API tokens, webhooks                                                     |
+
+### Admin
+| Page          | Path                   | Purpose                                              |
+|---------------|------------------------|------------------------------------------------------|
+| Cluster       | `/admin/cluster`       | Leader epoch, nodes, lease status                    |
+| Queues        | `/admin/queues`        | Redis stream depth, consumer groups                  |
+
+---
+
+## 2. Instance Detail Page - The 10/10 Moment
+
+Recruiters screenshot this page. It needs:
+
+Header: workflow name | status badge | instance ID | started | duration
+
+Tabs:
+- Timeline   - vertical DAG with step nodes colored by status (done/failed/running/pending)
+- Events     - append-only log, filter by type, expand JSON payloads
+- Context    - current step input/output, full accumulated state
+- Signals    - incoming + pending, send button
+- Timers     - scheduled + fired + cancelled
+- History    - replay event log with "replay from here" button
+- Logs       - stdout/stderr from step handlers
+
+Unique features no CRUD todo app has:
+- Replay from sequence N (Temporal signature feature)
+- Show event log as source of truth, not just current state
+- Visual DAG with live status
+
+---
+
+## 3. Backend REST Endpoints
+
+Currently only 2 exist:
+- POST /api/workflow/start/{name}
+- POST /api/workflow/{id}/signal/{signalName}
+
+Need to add:
+
+```
+GET    /api/workflow/instances                  list + filter (status, name, date)
+GET    /api/workflow/instances/{id}             full state + current step
+GET    /api/workflow/instances/{id}/events      paginated event log
+GET    /api/workflow/instances/{id}/context     accumulated step outputs
+POST   /api/workflow/instances/{id}/cancel      terminate
+POST   /api/workflow/instances/{id}/replay/{seq}  rebuild state from sequence
+GET    /api/workflow/instances/{id}/timers      active + history
+GET    /api/workflow/instances/{id}/signals     pending signals
+GET    /api/workflows                            registered workflow types
+GET    /api/workflows/{name}                    schema + input schema + DAG
+GET    /api/admin/leader                        current leader + epoch
+GET    /api/admin/workers                       consumer group state
+GET    /api/admin/queues                        redis stream stats
+GET    /api/health                              liveness
+GET    /api/metrics                             prometheus
+```
+
+---
+
+## 4. Features To Ship (priority order)
+
+### P0 - MVP (ship first)
+1. Finish REST endpoints listed above
+2. Fix Bug 1.1 (atomic sequence IDs) - critical, blocks correctness
+3. Fix Bug 1.2 (transaction rollback scope)
+4. Add `GET /instances` + `GET /instances/{id}` - frontend can't exist without
+5. Seed demo workflow: 3-step DAG (fetch -> transform -> notify) + signal step
+
+### P1 - Frontend works
+6. Instance detail page with Timeline tab
+7. Event log viewer (paginated, filterable)
+8. New instance form with JSON input
+9. Send signal modal
+10. Dashboard with live counts
+
+### P2 - 10/10 credibility
+11. Replay button - Temporal's signature feature
+12. DAG visualizer (react-flow)
+13. Leader status badge on dashboard
+14. Prometheus metrics endpoint
+15. Dockerfile + docker-compose (Postgres + Redis + app)
+
+### P3 - Stand out
+16. YAML workflow definition endpoint (load DAG from file)
+17. Workflow versioning
+18. Chaos test page (kill worker, watch recovery)
+19. Webhook on workflow completion
+
+---
+
+## 5. Tests (priority order)
+
+backend/src/test/java/.../
+  engine/
+    TaskFlowEngineConcurrencyTest     atomic sequence IDs (Bug 1.1)
+    TaskFlowEngineRetryTest           attempt counter, rollback (Bug 1.2)
+    TaskFlowEngineReEnqueueTest       Bug 1.4 - skip STEP_STARTED nodes
+    TaskFlowEngineParentChildTest     Bug 1.5 - parent log lock
+  scheduler/
+    TimerPollerServiceTest            Bug 1.6 - timer not lost on crash
+    WorkflowRecoverySchedulerTest     re-enqueue stuck RUNNING
+    LeaderElectionSchedulerTest       lease expiry
+  controller/
+    WorkflowControllerTest            integration - real DB, HTTP
+    InstancesControllerTest           pagination, filter
+    AdminControllerTest               leader + workers
+  smoke/
+    EndToEndDemoTest                  start -> run -> signal -> complete
+
+frontend/__tests__/
+  instance-detail.test.tsx            tabs render, event log filters
+  new-instance-form.test.tsx          schema-driven form
+  signal-modal.test.tsx               send signal, optimistic update
+
+Coverage targets:
+- engine/* 90%+
+- controller/* 80%+
+- scheduler/* 85%+
+
+---
+
+## 6. CI/CD
+
+GitHub Actions:
+
+`.github/workflows/ci.yml` - runs on PR + push to main
+  jobs:
+    - lint (mvn checkstyle or spotless for backend, eslint for frontend)
+    - typecheck (tsc --noEmit for frontend, mvn compile for backend)
+    - test-unit (mvn test -Dgroups=unit for backend, jest for frontend)
+    - test-integration (mvn test -Dgroups=integration with Postgres service)
+    - build (mvn package, next build)
+
+`.github/workflows/deploy.yml` - runs on tag v*
+  jobs:
+    - build-image (Docker multi-stage)
+    - push (ghcr.io)
+    - deploy (fly.io or render)
+
+Branch protection on main:
+- require CI green before merge
+- require 1 review
+
+---
+
+## 7. Build Order (the actual sequence)
+
+Week 1 - Backend solid:
+  Day 1-2: Fix Bug 1.1, 1.2, 1.4, 1.6
+  Day 3:   Add missing REST endpoints + integration tests
+  Day 4:   Add /api/admin/* endpoints
+  Day 5:   Demo workflow seeded + end-to-end test passes
+
+Week 2 - Frontend live:
+  Day 1:   /dashboard with counts
+  Day 2:   /dashboard/workflows + workflow detail
+  Day 3:   /dashboard/instances list + detail (Timeline + Events tabs)
+  Day 4:   New instance form + signal modal
+  Day 5:   /admin/cluster + /admin/queues
+
+Week 3 - 10/10 polish:
+  Day 1:   DAG visualizer (react-flow)
+  Day 2:   Replay button
+  Day 3:   Metrics + health
+  Day 4:   Dockerfile + docker-compose + deploy
+  Day 5:   README rewrite + GH pages demo
+
+---
+
+## 8. What Makes This 10/10 (not 7/10)
+
+Standard project (7/10):
+- CRUD endpoints
+- Basic UI
+- Tests
+- README
+
+10/10 adds:
+- Replay button (Temporal signature - nobody else has this)
+- Event log as first-class UI surface (not hidden)
+- DAG visualizer with live status
+- Leader election dashboard (proves you understand distributed systems)
+- Chaos test page (kill worker mid-flight, watch recovery)
+- YAML workflow definitions (developer ergonomics)
+- Prometheus metrics (production-grade observability)
+- End-to-end demo that survives worker crash mid-execution
+
+The story: "I built a Temporal clone that handles worker crashes, replays events
+from any point, and visualizes DAG execution live." Hiring manager stops scrolling.
+
+---
+
+## 9. Open Questions
+
+- Cloud target? Fly.io / Render / Railway / AWS / self-hosted
+- Frontend auth: keep Better-Auth or switch?
+- Demo deploy public or behind Cloudflare Access?
+- Domain name? (cheap, instant credibility)
+- Will this be portfolio-only or also a real product?

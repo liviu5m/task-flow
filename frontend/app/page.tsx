@@ -29,9 +29,7 @@ export default function LandingPage() {
         </div>
       </header>
 
-      {/* Hero Section */}
       <main className="flex-1 flex flex-col items-center justify-center text-center px-6 py-20 relative overflow-hidden">
-        {/* Subtle background glow effect */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[300px] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
 
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs text-emerald-400 font-mono mb-6">
@@ -68,7 +66,6 @@ export default function LandingPage() {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="border-t border-slate-800 py-6 px-8 text-center text-xs text-slate-500 font-mono">
         TaskFlow Enterprise Queue Infrastructure © 2026. All rights reserved.
       </footer>

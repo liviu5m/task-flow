@@ -32,6 +32,9 @@ public class WorkflowInstance extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 100)
     private WorkflowInstanceStatus status;
+
+    @Column(nullable = false, length = 100)
+    private String userId;
     
     public void prePersist() {
         if (this.id == null) {

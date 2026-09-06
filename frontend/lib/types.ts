@@ -1,18 +1,10 @@
 export type TaskStatus =
   "RUNNING" | "QUEUED" | "COMPLETED" | "FAILED" | "RETRY_WAITING";
 
-export interface Task {
+export type ApiKey = {
   id: number;
   name: string;
-  status: TaskStatus;
-  priority: number;
-  payloadJson: string;
-  retryCount: number;
-  maxRetries: number;
-  errorDetails: string;
+  keyHash: string;
+  userId: string;
   createdAt: string;
-  updatedAt: string;
-  duration?: string;
-  age?: string;
-  desc?: string;
-}
+};
