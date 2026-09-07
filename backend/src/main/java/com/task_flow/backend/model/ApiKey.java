@@ -23,6 +23,6 @@ public class ApiKey extends BaseEntity {
   @Column(nullable = false)
   private String keyHash;
 
-  @Column(nullable = false)
+  @Column(nullable = false, unique = true)
   private String name;
 }

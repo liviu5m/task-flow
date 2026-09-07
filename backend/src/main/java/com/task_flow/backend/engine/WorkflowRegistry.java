@@ -5,6 +5,8 @@ import org.jgrapht.graph.DirectedAcyclicGraph;
 import org.springframework.stereotype.Component;
 
 import com.task_flow.backend.dto.StepContext;
+import com.task_flow.backend.model.ApiKey;
+import com.task_flow.backend.repository.ApiKeyRepository;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -17,11 +19,13 @@ import java.util.function.Predicate;
 
 @Component
 public class WorkflowRegistry {
-    
-    private final Map<String, WorkflowDefinition> registry = new HashMap<>();
 
-    public WorkflowRegistry() {
-      register("test-workflow", builder -> {
+    private final Map<String, WorkflowDefinition> registry = new HashMap<>();
+    private final ApiKeyRepository apiKeyRepository;
+
+    public WorkflowRegistry(ApiKeyRepository apiKeyRepository) {
+        this.apiKeyRepository = apiKeyRepository;
+        register("test-workflow", builder -> {
             builder.step("step1", (context, input) -> {
                 System.out.println(">>> [STEP] Executing step1 for workflow: " + input.get("workflowId"));
                 return "step1-output";
@@ -29,18 +33,45 @@ public class WorkflowRegistry {
         });
     }
 
-    public void register(String name, Consumer<WorkflowBuilder> configurer) {
-        WorkflowBuilder builder = new WorkflowBuilder(name);
+    public void register(String workflowName, Consumer<WorkflowBuilder> configurer) {
+        ApiKey apiKey = getApiKey();
+        String key = buildKey(apiKey.getUserId(), apiKey.getName(), workflowName);
+
+        WorkflowBuilder builder = new WorkflowBuilder(workflowName);
         configurer.accept(builder);
-        registry.put(name, builder.build());
+        registry.put(key, builder.build());
     }
 
-    public WorkflowDefinition get(String name) {
-        WorkflowDefinition def = registry.get(name);
+    public WorkflowDefinition get(String workflowName) {
+        ApiKey apiKey = getApiKey();
+        String key = buildKey(apiKey.getUserId(), apiKey.getName(), workflowName);
+
+        WorkflowDefinition def = registry.get(key);
         if (def == null) {
-            throw new IllegalArgumentException("Workflow not found in registry: " + name);
+            throw new IllegalArgumentException("Workflow not found in registry: " + workflowName);
         }
         return def;
+    }
+
+    private String buildKey(String userId, String keyName, String workflowName) {
+        return userId + ":" + keyName + ":" + workflowName;
+    }
+
+    private ApiKey getApiKey() {
+        String rawKey = System.getenv("TASKFLOW_API_KEY");
+        if (rawKey == null || rawKey.isBlank()) {
+            throw new IllegalStateException("TASKFLOW_API_KEY not set in environment");
+        }
+        return apiKeyRepository.findByKeyHash(rawKey)
+                .orElseThrow(() -> new IllegalStateException("Invalid API key"));
+    }
+    public List<String> listWorkflows(ApiKey apiKey) {
+        String prefix = apiKey.getUserId() + ":" + apiKey.getName() + ":";
+
+        return registry.keySet().stream()
+                .filter(key -> key.startsWith(prefix))
+                .map(key -> key.substring(prefix.length()))
+                .toList();
     }
 }
 

@@ -9,15 +9,18 @@ import com.task_flow.backend.model.WorkflowInstance;
 import com.task_flow.backend.repository.PendingSignalRepository;
 import com.task_flow.backend.repository.WorkflowEventRepository;
 import com.task_flow.backend.repository.WorkflowInstanceRepository;
+import com.task_flow.backend.service.WorkflowService;
 
 import jakarta.transaction.Transactional;
 import tools.jackson.databind.ObjectMapper;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
@@ -33,19 +36,22 @@ public class WorkflowController {
     private final PendingSignalRepository pendingSignalRepository;
     private final WorkflowEventRepository eventRepository;
     private final ObjectMapper objectMapper;
+    private final WorkflowService workflowService;
 
     public WorkflowController(
         TaskFlowEngine engine,
         WorkflowInstanceRepository workflowInstanceRepository,
         PendingSignalRepository pendingSignalRepository,
         WorkflowEventRepository eventRepository,
-        ObjectMapper objectMapper
+        ObjectMapper objectMapper,
+        WorkflowService workflowService
     ) {
         this.engine = engine;
         this.workflowInstanceRepository = workflowInstanceRepository;
         this.pendingSignalRepository = pendingSignalRepository;
         this.eventRepository = eventRepository;
         this.objectMapper = objectMapper;
+        this.workflowService = workflowService;
     }
 
     @PostMapping("/start/{workflowName}")
@@ -91,5 +97,10 @@ public class WorkflowController {
         engine.executeWorkflow(workflowId, workflowInstance.getName());
 
         return ResponseEntity.ok().body("Signal received");
+    }
+
+    @GetMapping("/")
+    public ResponseEntity<?> getWorkflows(@RequestParam Long apiKeyId) {
+      return ResponseEntity.ok(workflowService.getWorkflows(apiKeyId));
     }
 }
