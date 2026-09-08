@@ -1,7 +1,7 @@
 spring:
   application:
   config:
-    import: optional:file:.env[.properties]   
+    import: optional:file:.env[.properties]
   name: backend
   datasource:
     url: ${DB_URL}
@@ -14,7 +14,7 @@ spring:
         format_sql: true
         show_sql: false
     hibernate:
-      ddl-auto: create
+      ddl-auto: update
   data:
     redis:
       host: ${REDIS_HOST}

@@ -2,17 +2,21 @@ package com.task_flow.backend.engine;
 
 import org.jgrapht.graph.DefaultEdge;
 import org.jgrapht.graph.DirectedAcyclicGraph;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import com.task_flow.backend.dto.StepContext;
 import com.task_flow.backend.model.ApiKey;
 import com.task_flow.backend.repository.ApiKeyRepository;
 
+import jakarta.annotation.PostConstruct;
+
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -22,15 +26,11 @@ public class WorkflowRegistry {
 
     private final Map<String, WorkflowDefinition> registry = new HashMap<>();
     private final ApiKeyRepository apiKeyRepository;
+    @Value("${TASKFLOW_API_KEY}")
+    private String apiKey;
 
     public WorkflowRegistry(ApiKeyRepository apiKeyRepository) {
         this.apiKeyRepository = apiKeyRepository;
-        register("test-workflow", builder -> {
-            builder.step("step1", (context, input) -> {
-                System.out.println(">>> [STEP] Executing step1 for workflow: " + input.get("workflowId"));
-                return "step1-output";
-            }, 3);
-        });
     }
 
     public void register(String workflowName, Consumer<WorkflowBuilder> configurer) {
@@ -58,11 +58,10 @@ public class WorkflowRegistry {
     }
 
     private ApiKey getApiKey() {
-        String rawKey = System.getenv("TASKFLOW_API_KEY");
-        if (rawKey == null || rawKey.isBlank()) {
+        if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException("TASKFLOW_API_KEY not set in environment");
         }
-        return apiKeyRepository.findByKeyHash(rawKey)
+        return apiKeyRepository.findByKeyHash(apiKey)
                 .orElseThrow(() -> new IllegalStateException("Invalid API key"));
     }
     public List<String> listWorkflows(ApiKey apiKey) {
@@ -71,6 +70,14 @@ public class WorkflowRegistry {
         return registry.keySet().stream()
                 .filter(key -> key.startsWith(prefix))
                 .map(key -> key.substring(prefix.length()))
+                .toList();
+    }
+    public List<String> getAllWorkflows() {
+        return registry.keySet().stream()
+                .map(key -> key.split(":", 3))
+                .filter(parts -> parts.length == 3)
+                .map(parts -> parts[2])
+                .distinct()
                 .toList();
     }
 }
