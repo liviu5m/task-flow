@@ -86,6 +86,7 @@ public class TaskFlowEngine {
     instance.setId(workflowId);
     instance.setName(workflowName);
     instance.setStatus(WorkflowInstanceStatus.valueOf("RUNNING"));
+    instance.setUserId(registry.getUserId());
     instanceRepository.save(instance);
   
     appendEventAtomic(workflowId, WorkflowEventType.WORKFLOW_STARTED, initialInput);

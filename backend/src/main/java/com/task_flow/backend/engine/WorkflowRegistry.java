@@ -64,6 +64,11 @@ public class WorkflowRegistry {
         return apiKeyRepository.findByKeyHash(apiKey)
                 .orElseThrow(() -> new IllegalStateException("Invalid API key"));
     }
+  
+    public String getUserId() {
+        return getApiKey().getUserId();
+    }
+
     public List<String> listWorkflows(ApiKey apiKey) {
         String prefix = apiKey.getUserId() + ":" + apiKey.getName() + ":";
 
