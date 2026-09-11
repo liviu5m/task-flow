@@ -11,4 +11,5 @@ import java.util.UUID;
 public interface WorkflowTimerRepository extends JpaRepository<WorkflowTimer, UUID> {
     @Query(value = "SELECT * FROM \"task-flow\".workflow_timers WHERE fires_at <= NOW() AND NOT fired FOR UPDATE SKIP LOCKED", nativeQuery = true)
     List<WorkflowTimer> findDueTimersForUpdate();
+    List<WorkflowTimer> findByWorkflowId(UUID workflowId);
 }

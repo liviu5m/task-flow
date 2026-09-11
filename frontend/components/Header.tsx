@@ -9,9 +9,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useSession } from "@/lib/auth-client";
 import { User, LogOut } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 export function Header() {
+  const { data } = useSession();
+  const user = data?.user;
+  const router = useRouter();
+
   return (
     <header className="border-b border-slate-800 px-6 h-16 flex items-center justify-between bg-[#0b0f17]">
       <div className="flex items-center gap-3">
@@ -46,19 +52,49 @@ export function Header() {
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-1">
                   <p className="text-sm font-medium leading-none text-slate-200">
-                    John Doe
+                    {user?.name}
                   </p>
                   <p className="text-xs leading-none text-slate-400 font-mono">
-                    john@acme.dev
+                    {user?.email}
                   </p>
                 </div>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator className="bg-slate-800" />
             <DropdownMenuGroup>
-              <DropdownMenuItem className="focus:bg-slate-800 focus:text-slate-100 cursor-pointer text-xs font-mono">
+              <DropdownMenuItem
+                className="focus:bg-slate-800 focus:text-slate-100 cursor-pointer text-xs font-mono"
+                onClick={() => {
+                  router.push("/dashboard/profile");
+                }}
+              >
                 <User className="mr-2 h-4 w-4" />
                 <span>Profile</span>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+
+            <DropdownMenuSeparator className="bg-slate-800" />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                className="focus:bg-slate-800 focus:text-slate-100 cursor-pointer text-xs font-mono"
+                onClick={() => {
+                  router.push("/dashboard/api-keys");
+                }}
+              >
+                <User className="mr-2 h-4 w-4" />
+                <span>API Keys</span>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                className="focus:bg-slate-800 focus:text-slate-100 cursor-pointer text-xs font-mono"
+                onClick={() => {
+                  router.push("/dashboard/workflows");
+                }}
+              >
+                <User className="mr-2 h-4 w-4" />
+                <span>Workflows</span>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator className="bg-slate-800" />

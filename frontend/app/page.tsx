@@ -1,8 +1,13 @@
 "use client";
 
+import { useSession } from "@/lib/auth-client";
 import Link from "next/link";
 
 export default function LandingPage() {
+  const { data } = useSession();
+  const user = data?.user;
+  console.log(user);
+
   return (
     <div className="min-h-screen bg-[#0b0f17] text-slate-100 flex flex-col justify-between font-sans antialiased selection:bg-emerald-500 selection:text-white">
       <header className="w-full border-b border-slate-800/80 px-8 h-20 flex items-center justify-between backdrop-blur-md bg-[#0b0f17]/80 sticky top-0 z-50">
@@ -13,20 +18,29 @@ export default function LandingPage() {
             v0.4
           </span>
         </div>
-        <div className="flex items-center gap-4">
+        {user ? (
           <Link
-            href="/auth/login"
-            className="text-sm font-medium text-slate-300 hover:text-slate-100 px-4 py-2 transition-colors"
-          >
-            Sign In
-          </Link>
-          <Link
-            href="/auth/signup"
+            href="/dashboard"
             className="text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition-colors shadow-lg shadow-emerald-950/50"
           >
-            Get Started
+            {user?.name}
           </Link>
-        </div>
+        ) : (
+          <div className="flex items-center gap-4">
+            <Link
+              href="/auth/login"
+              className="text-sm font-medium text-slate-300 hover:text-slate-100 px-4 py-2 transition-colors"
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/auth/signup"
+              className="text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg transition-colors shadow-lg shadow-emerald-950/50"
+            >
+              Get Started
+            </Link>
+          </div>
+        )}
       </header>
 
       <main className="flex-1 flex flex-col items-center justify-center text-center px-6 py-20 relative overflow-hidden">

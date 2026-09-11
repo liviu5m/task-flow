@@ -21,5 +21,5 @@ public interface WorkflowInstanceRepository extends JpaRepository<WorkflowInstan
   @Query("SELECT w FROM WorkflowInstance w WHERE w.id = :id")
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   Optional<WorkflowInstance> findByIdForUpdate(@Param("id") UUID id);
-
+  List<WorkflowInstance> findByUserId(String userId);
 }

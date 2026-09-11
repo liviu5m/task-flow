@@ -1,283 +1,312 @@
 "use client";
 
-import { Header } from "@/components/Header";
 import React, { useState } from "react";
+import {
+  Activity,
+  Clock,
+  Terminal,
+  AlertCircle,
+  CheckCircle,
+  ChevronRight,
+  Filter,
+} from "lucide-react";
+import { getWorkflowInstances } from "@/api/workflow";
+import { useQuery } from "@tanstack/react-query";
 
-interface Step {
-  id: number;
-  name: string;
-  attempt: string;
-  duration?: string;
-  meta: string;
-  status: "COMPLETED" | "RUNNING" | "PENDING";
-  input?: Record<string, any>;
-  output?: any;
-  started?: string;
-  ended?: string;
-  signal?: string;
+interface WorkflowInstance {
+  id: string;
+  workflowName: string;
+  status: "COMPLETED" | "RUNNING" | "FAILED";
+  startedAt: string;
+  duration: string;
+  events: Array<{ seq: number; type: string; timestamp: string; payload: any }>;
+  timers: Array<{ id: string; fireAt: string; status: string }>;
+  signals: Array<{ name: string; receivedAt: string; payload: any }>;
 }
 
-const STEPS: Step[] = [
+const MOCK_INSTANCES: WorkflowInstance[] = [
   {
-    id: 1,
-    name: "fetch-order",
-    attempt: "1/3",
-    duration: "820ms",
-    meta: "entry node",
-    status: "COMPLETED",
-  },
-  {
-    id: 2,
-    name: "reserve-stock",
-    attempt: "2/5",
-    duration: "5.35s",
-    meta: "after fetch-order",
-    status: "COMPLETED",
-  },
-  {
-    id: 3,
-    name: "risk-check",
-    attempt: "1/3",
-    duration: "1.25s",
-    meta: "after fetch-order",
-    status: "COMPLETED",
-  },
-  {
-    id: 4,
-    name: "await-payment",
-    attempt: "1/1",
-    meta: "after reserve-stock, risk-check",
+    id: "wf_inst_9981abc",
+    workflowName: "OrderFulfilment",
     status: "RUNNING",
-    started: "2026-09-06 09:41:18Z",
-    signal: "payment.captured",
-    input: { signal: "payment.captured", timeoutSeconds: 900 },
-    output: null,
+    startedAt: "2026-09-06 10:00:00Z",
+    duration: "4m 12s",
+    events: [
+      {
+        seq: 1,
+        type: "WORKFLOW_STARTED",
+        timestamp: "10:00:00Z",
+        payload: { orderId: "ORD-999" },
+      },
+      {
+        seq: 2,
+        type: "STEP_COMPLETED",
+        timestamp: "10:00:02Z",
+        payload: { step: "fetch-order" },
+      },
+      {
+        seq: 3,
+        type: "SIGNAL_AWAITING",
+        timestamp: "10:00:03Z",
+        payload: { signal: "payment.captured" },
+      },
+    ],
+    timers: [
+      { id: "timer_1", fireAt: "2026-09-06 10:15:00Z", status: "ACTIVE" },
+    ],
+    signals: [
+      {
+        name: "payment.captured",
+        receivedAt: "Pending",
+        payload: { timeoutSeconds: 900 },
+      },
+    ],
   },
   {
-    id: 5,
-    name: "ship-order",
-    attempt: "0/3",
-    meta: "after await-payment",
-    status: "PENDING",
-  },
-  {
-    id: 6,
-    name: "notify-customer",
-    attempt: "0/4",
-    meta: "after ship-order",
-    status: "PENDING",
+    id: "wf_inst_5542xyz",
+    workflowName: "UserOnboarding",
+    status: "COMPLETED",
+    startedAt: "2026-09-06 09:15:00Z",
+    duration: "1m 05s",
+    events: [
+      {
+        seq: 1,
+        type: "WORKFLOW_STARTED",
+        timestamp: "09:15:00Z",
+        payload: { userId: "U-123" },
+      },
+      {
+        seq: 2,
+        type: "STEP_COMPLETED",
+        timestamp: "09:15:05Z",
+        payload: { step: "send-welcome-email" },
+      },
+      {
+        seq: 3,
+        type: "WORKFLOW_COMPLETED",
+        timestamp: "09:16:05Z",
+        payload: { result: "success" },
+      },
+    ],
+    timers: [],
+    signals: [],
   },
 ];
 
-export default function WorkflowConsole() {
-  const [selectedStep, setSelectedStep] = useState<Step>(STEPS[3]);
-  const [activeTab, setActiveTab] = useState("TIMELINE");
+export default function InstancesDashboardPage() {
+  const [selectedInstance, setSelectedInstance] =
+    useState<WorkflowInstance | null>(MOCK_INSTANCES[0]);
+  const { data: instances, isLoading: isLoadingInstances } = useQuery({
+    queryKey: ["workflow-instances"],
+    queryFn: () => getWorkflowInstances(),
+    enabled: true,
+  });
+  console.log(instances);
+
+  const [activeTab, setActiveTab] = useState<"EVENTS" | "TIMERS" | "SIGNALS">(
+    "EVENTS",
+  );
+  const [filterType, setFilterType] = useState("");
 
   return (
-    <div className="min-h-screen bg-[#0b0f17] text-slate-100 font-sans antialiased flex flex-col">
-      {/* Workflow Header Banner */}
-      <div className="border-b border-slate-800/80 px-8 py-6 bg-[#0f141d]/50">
-        <div className="text-[10px] uppercase tracking-widest text-slate-500 font-mono mb-1">
-          Workflow
-        </div>
-        <div className="flex items-center justify-between flex-wrap gap-4">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-100">
-              OrderFulfilment
-            </h1>
-            <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-              v4
-            </span>
-            <span className="text-xs px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              AWAITING SIGNAL
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-4 py-2 rounded transition">
-              Send signal
-            </button>
-            <button className="bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-xs font-medium px-4 py-2 rounded transition">
-              Cancel run
-            </button>
-          </div>
-        </div>
-
-        {/* Metadata Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-6 mt-6 pt-6 border-t border-slate-800/60 text-xs font-mono">
-          <div>
-            <div className="text-slate-500 mb-1">INSTANCE ID</div>
-            <div className="text-slate-300 truncate">
-              wf_01J9XQ4K7ZC2MPBR3TN...
-            </div>
-          </div>
-          <div>
-            <div className="text-slate-500 mb-1">CURRENT STEP</div>
-            <div className="text-emerald-400 font-medium">await-payment</div>
-          </div>
-          <div>
-            <div className="text-slate-500 mb-1">STARTED</div>
-            <div className="text-slate-300">2026-09-06 09:41:12Z</div>
-          </div>
-          <div>
-            <div className="text-slate-500 mb-1">DURATION</div>
-            <div className="text-slate-300">3m 4s</div>
-          </div>
-          <div>
-            <div className="text-slate-500 mb-1">QUEUE</div>
-            <div className="text-slate-300">taskflow:stream:default</div>
-          </div>
-          <div>
-            <div className="text-slate-500 mb-1">LEADER</div>
-            <div className="text-slate-300">node-a1 (epoch 17)</div>
-          </div>
-        </div>
+    <div className="max-w-7xl mx-auto space-y-6 font-mono text-xs p-6">
+      <div>
+        <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+          <Activity className="h-5 w-5 text-emerald-400" /> Workflow Instances
+          Dashboard
+        </h1>
+        <p className="text-slate-400 mt-1">
+          Select an instance to inspect fully detailed events, timers, and
+          signals.
+        </p>
       </div>
 
-      {/* Tabs */}
-      <div className="border-b border-slate-800/80 px-8 flex gap-8 text-xs font-mono">
-        {[
-          "TIMELINE",
-          "EVENTS",
-          "CONTEXT",
-          "SIGNALS",
-          "TIMERS",
-          "HISTORY",
-          "LOGS",
-        ].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`py-3.5 border-b-2 font-medium transition ${
-              activeTab === tab
-                ? "border-emerald-500 text-emerald-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Instances List */}
+        <div className="bg-[#111827] border border-slate-800 rounded-xl p-4 space-y-3 shadow-xl">
+          <div className="text-slate-400 font-bold mb-2">
+            Instances ({MOCK_INSTANCES.length})
+          </div>
+          <div className="space-y-2">
+            {MOCK_INSTANCES.map((inst) => (
+              <div
+                key={inst.id}
+                onClick={() => setSelectedInstance(inst)}
+                className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
+                  selectedInstance?.id === inst.id
+                    ? "bg-emerald-950/30 border-emerald-500/50 text-emerald-300 shadow-lg"
+                    : "bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700"
+                }`}
+              >
+                <div>
+                  <div className="font-bold text-slate-100">
+                    {inst.workflowName}
+                  </div>
+                  <div className="text-[10px] text-slate-500">{inst.id}</div>
+                </div>
+                <div className="text-right">
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded ${
+                      inst.status === "COMPLETED"
+                        ? "bg-emerald-950 text-emerald-400"
+                        : "bg-amber-950 text-amber-400"
+                    }`}
+                  >
+                    {inst.status}
+                  </span>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    {inst.duration}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Instance Details / Event Stream Viewer */}
+        <div className="lg:col-span-2 bg-[#111827] border border-slate-800 rounded-xl p-6 space-y-4 shadow-xl">
+          {selectedInstance ? (
+            <>
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <div className="text-sm font-bold text-slate-100">
+                    {selectedInstance.workflowName}
+                  </div>
+                  <div className="text-[10px] text-slate-500">
+                    ID: {selectedInstance.id} | Started:{" "}
+                    {selectedInstance.startedAt}
+                  </div>
+                </div>
+                <span className="text-xs px-2.5 py-1 rounded bg-slate-900 border border-slate-800 text-emerald-400">
+                  {selectedInstance.status}
+                </span>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex gap-4 border-b border-slate-800 pb-2 text-xs">
+                {(["EVENTS", "TIMERS", "SIGNALS"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`font-medium pb-1 border-b-2 transition ${
+                      activeTab === tab
+                        ? "border-emerald-500 text-emerald-400"
+                        : "border-transparent text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {tab} (
+                    {tab === "EVENTS"
+                      ? selectedInstance.events.length
+                      : tab === "TIMERS"
+                        ? selectedInstance.timers.length
+                        : selectedInstance.signals.length}
+                    )
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab Content */}
+              {activeTab === "EVENTS" && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-3.5 w-3.5 text-slate-500" />
+                    <input
+                      type="text"
+                      placeholder="Filter event types..."
+                      value={filterType}
+                      onChange={(e) => setFilterType(e.target.value)}
+                      className="bg-slate-900 border border-slate-800 rounded px-2 py-1 text-xs text-slate-200 w-full focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                  <div className="divide-y divide-slate-800/80 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/30">
+                    {selectedInstance.events
+                      .filter((ev) =>
+                        ev.type
+                          .toLowerCase()
+                          .includes(filterType.toLowerCase()),
+                      )
+                      .map((ev) => (
+                        <div key={ev.seq} className="p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-emerald-400 font-bold">
+                              #{ev.seq} {ev.type}
+                            </span>
+                            <span className="text-[10px] text-slate-500">
+                              {ev.timestamp}
+                            </span>
+                          </div>
+                          <pre className="bg-slate-950 p-2 rounded border border-slate-900 text-slate-300 overflow-x-auto text-[10px]">
+                            {JSON.stringify(ev.payload, null, 2)}
+                          </pre>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "TIMERS" && (
+                <div className="space-y-2">
+                  {selectedInstance.timers.length === 0 ? (
+                    <div className="p-6 text-center text-slate-500">
+                      No active timers.
+                    </div>
+                  ) : (
+                    selectedInstance.timers.map((t) => (
+                      <div
+                        key={t.id}
+                        className="p-3 bg-slate-900/50 border border-slate-800 rounded flex items-center justify-between"
+                      >
+                        <div>
+                          <div className="font-bold text-slate-200">{t.id}</div>
+                          <div className="text-[10px] text-slate-500">
+                            Fire at: {t.fireAt}
+                          </div>
+                        </div>
+                        <span className="text-cyan-400 bg-cyan-950/40 border border-cyan-900 px-2 py-0.5 rounded text-[10px]">
+                          {t.status}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {activeTab === "SIGNALS" && (
+                <div className="space-y-2">
+                  {selectedInstance.signals.length === 0 ? (
+                    <div className="p-6 text-center text-slate-500">
+                      No signals registered.
+                    </div>
+                  ) : (
+                    selectedInstance.signals.map((s, idx) => (
+                      <div
+                        key={idx}
+                        className="p-3 bg-slate-900/50 border border-slate-800 rounded space-y-1"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-amber-400">
+                            {s.name}
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            {s.receivedAt}
+                          </span>
+                        </div>
+                        <pre className="bg-slate-950 p-2 rounded border border-slate-900 text-slate-300 text-[10px]">
+                          {JSON.stringify(s.payload, null, 2)}
+                        </pre>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="py-24 text-center text-slate-500">
+              Select an instance to view details.
+            </div>
+          )}
+        </div>
       </div>
-
-      {/* Main Content */}
-      <main className="flex-1 p-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* DAG Execution Column */}
-        <div className="lg:col-span-2 bg-[#0f141d]/40 border border-slate-800/80 rounded-xl p-6 relative">
-          <div className="text-[10px] uppercase tracking-widest text-slate-500 font-mono mb-6">
-            DAG EXECUTION
-          </div>
-
-          <div className="relative pl-6 space-y-6 before:absolute before:left-[19px] before:top-3 before:bottom-3 before:w-0.5 before:bg-slate-800">
-            {STEPS.map((step) => {
-              const isSelected = selectedStep.id === step.id;
-              return (
-                <div
-                  key={step.id}
-                  onClick={() => setSelectedStep(step)}
-                  className={`relative flex items-center justify-between p-4 rounded-lg border transition cursor-pointer ${
-                    isSelected
-                      ? "bg-slate-900/90 border-emerald-500/50 shadow-lg"
-                      : "bg-[#0b0f17]/60 border-slate-800/80 hover:border-slate-700"
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-mono z-10 ${
-                        step.status === "COMPLETED"
-                          ? "bg-emerald-950 text-emerald-400 border border-emerald-800"
-                          : step.status === "RUNNING"
-                            ? "bg-cyan-950 text-cyan-400 border border-cyan-800 animate-pulse"
-                            : "bg-slate-900 text-slate-500 border border-slate-800"
-                      }`}
-                    >
-                      {step.id}
-                    </div>
-                    <div>
-                      <div className="font-mono font-medium text-sm text-slate-200">
-                        {step.name}
-                      </div>
-                      <div className="text-xs text-slate-500 font-mono mt-0.5">
-                        attempt {step.attempt}{" "}
-                        {step.duration && `· ${step.duration}`} · {step.meta}
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <span
-                      className={`text-[10px] px-2 py-1 rounded font-mono font-semibold ${
-                        step.status === "COMPLETED"
-                          ? "bg-emerald-950/80 text-emerald-400 border border-emerald-900"
-                          : step.status === "RUNNING"
-                            ? "bg-cyan-950/80 text-cyan-400 border border-cyan-900"
-                            : "bg-slate-900 text-slate-500 border border-slate-800"
-                      }`}
-                    >
-                      {step.status}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="mt-8 text-[11px] text-slate-600 font-mono">
-            # demo data — this console is wired to fixtures, not a live engine
-            yet
-          </div>
-        </div>
-
-        {/* Step Detail Column */}
-        <div className="bg-[#0f141d]/40 border border-slate-800/80 rounded-xl p-6 font-mono text-xs flex flex-col justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-500 mb-6">
-              STEP DETAIL
-            </div>
-
-            <div className="text-base font-bold text-slate-200 mb-1">
-              {selectedStep.name}
-            </div>
-            {selectedStep.signal && (
-              <div className="text-slate-400 mb-6">
-                signal:
-                <span className="text-emerald-400">{selectedStep.signal}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4 mb-6 pt-4 border-t border-slate-800/80">
-              <div>
-                <div className="text-slate-500 text-[10px] mb-1">STARTED</div>
-                <div className="text-slate-300">
-                  {selectedStep.started || "—"}
-                </div>
-              </div>
-              <div>
-                <div className="text-slate-500 text-[10px] mb-1">ENDED</div>
-                <div className="text-slate-300">
-                  {selectedStep.ended || "—"}
-                </div>
-              </div>
-            </div>
-
-            <div className="mb-6">
-              <div className="text-slate-500 text-[10px] mb-2">INPUT</div>
-              <pre className="bg-[#0b0f17] p-3 rounded-lg border border-slate-800 text-slate-300 overflow-x-auto text-[11px]">
-                {selectedStep.input
-                  ? JSON.stringify(selectedStep.input, null, 2)
-                  : "null"}
-              </pre>
-            </div>
-
-            <div>
-              <div className="text-slate-500 text-[10px] mb-2">OUTPUT</div>
-              <div className="bg-[#0b0f17] p-3 rounded-lg border border-slate-800 text-slate-500">
-                {selectedStep.output === null
-                  ? "null"
-                  : JSON.stringify(selectedStep.output)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </main>
     </div>
   );
 }

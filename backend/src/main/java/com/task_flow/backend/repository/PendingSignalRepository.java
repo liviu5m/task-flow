@@ -1,5 +1,6 @@
 package com.task_flow.backend.repository;
 
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -13,5 +14,5 @@ public interface PendingSignalRepository extends JpaRepository<PendingSignal, Pe
   
   PendingSignal findByWorkflowIdAndSignalName(UUID workflowId, String signalName);
   boolean existsById(PendingSignalId id);
-
+  List<PendingSignal> findByWorkflowId(UUID workflowId);
 }

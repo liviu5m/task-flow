@@ -103,4 +103,9 @@ public class WorkflowController {
     public ResponseEntity<?> getWorkflows(@RequestParam Long apiKeyId) {
       return ResponseEntity.ok(workflowService.getWorkflows(apiKeyId));
     }
+
+    @GetMapping("/instances")
+    public ResponseEntity<?> getWorkflowInstances(@RequestParam Long apiKeyId) {
+        return ResponseEntity.ok(workflowService.getWorkflowInstances(apiKeyId));
+    }
 }
